@@ -1,0 +1,77 @@
+# 分布式训练配置 (如果使用)
+distibution_train:
+  backend: 'nccl' # choices=['nccl', 'gloo', 'mpi', 'torch']
+  init_method: 'env://'
+  workers: 8      # 根据你的硬件调整 DataLoader workers
+
+# 数据集配置
+dataset:
+  dataset: voc2007
+  nclass: 20                # VOC2007 类别数 (会被动态覆盖)
+  size: 224                 # 图像尺寸 (会被动态覆盖)
+  data_dir: '../dataset'
+  load_memory: True        # 对于大型 .pt 文件，通常为 False
+  batch_real: 128            # Condense 模式下的真实数据批次大小
+  nch: 3                    # 图像通道数
+  is_multilabel: True       # 显式声明为多标签
+
+# 网络配置
+network:
+  net_type: convnet         # 使用卷积网络
+  norm_type: instance          # 使用 BatchNorm (或 instance)
+  depth: 5                  # 指定 5 层卷积网络
+  width: 1.0                # ConvNet 宽度因子
+
+# 训练配置 (用于 Pretrain 和 Evaluation)
+train:
+  evaluation_epochs: 2000     # 评估模式下的训练轮数
+  epoch_print_freq: 10      # 打印频率
+  epoch_eval_interval: 100    # 评估间隔 (轮)
+  pertrain_epochs: 60       # 预训练模式下的轮数 (根据需要调整)
+  batch_size: 128            # 预训练/评估时的训练批次大小 (会被 world_size 除)
+  lr: 0.01                  # 学习率 (Adam/AdamW 通常较低)
+  adamw_lr: 0.001            # 如果 eval_optimizer 是 adamw
+  eval_optimizer: adamw      # 评估时使用的优化器 (adam 或 sgd)
+  momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)
+  weight_decay: 5e-4        # 权重衰减 (AdamW 需要)
+  seed: 42                  # 随机种子
+  model_num: 10             # 预训练模型的数量 (如果需要生成多个)
+
+# 数据增强配置
+augmentation:
+  mixup: cut               # 不使用 mixup/cutmix (none, cut, mix)
+  beta: 1.0                 # Mixup beta (如果 mixup != none)
+  mix_p: 0.5                # Mixup 概率 (如果 mixup != none)
+  rrc: True                # 是否使用 RandomResizedCrop (通常用于 ImageNet)
+  dsa: False                # 是否使用 DSA
+  dsa_strategy: "color_crop_cutout_flip_scale_rotate" # DSA 策略 (如果 dsa=true)
+  aug_type: ''          # 基础增强类型 (none, color_crop_cutout, etc.)
+
+# 优化配置 (用于 Condense)
+optimization:
+  optimizer: adamw           # 蒸馏优化器 (adam 或 sgd)
+  lr_scale_adam: 0.1        # Adam/AdamW 学习率缩放因子 (相对于 lr_img)
+  lr_img: 0.01              # 蒸馏图像的学习率 (如果 optimizer=sgd)
+  mom_img: 0.5              # 蒸馏图像的 momentum (如果 optimizer=sgd)
+  lr_sampling_net: 1e-3     # 采样网络学习率 (如果使用)
+
+# 保存路径配置
+save_path:
+  save_dir: "../results/condense" # 结果保存目录 (建议包含数据集和ipc)
+  pretrain_dir: '../pretrained_models' # 预训练模型保存目录
+
+# 蒸馏 (Condense) 配置
+condense:
+  ipc: 10                   # 每个类别的图像数
+  num_premodel: 10          # 使用的预训练模型数量 (应 <= train.model_num)
+  niter: 20000               # 蒸馏迭代次数 (outer_loop)
+  iter_calib: 1             # 校准迭代次数
+  calib_weight: 1           # 校准权重
+  sampling_net: False       # 是否使用采样网络
+  num_freqs: 4096           # NCFM 频率数量
+  dis_metrics: "NCFM"       # 蒸馏度量
+  factor: 2                 # NCFM 因子
+  alpha_for_loss: 0.5       # NCFM 损失 alpha
+  beta_for_loss: 0.5        # NCFM 损失 beta
+  decode_type: 'single'     # 解码类型 (single, multi, bound)
+  teacher_model_epoch: 20   # 使用哪个 epoch 的教师模型 

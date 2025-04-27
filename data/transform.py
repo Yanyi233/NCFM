@@ -180,3 +180,47 @@ def transform_imagenet(
     test_transform = transforms.Compose(resize_test + cast + normal_fn)
 
     return train_transform, test_transform
+
+
+def transform_voc2007(augment=False, from_tensor=False, normalize=True, size=224):
+    """
+    Defines transforms for VOC2007 dataset.
+    Assumes MEANS["voc2007"] and STDS["voc2007"] are defined in dataset_statistics.
+    """
+    # --- 训练集转换 ---
+    train_aug = []
+    if augment:
+        # 为 VOC 添加常见的增强：随机调整大小裁剪和水平翻转
+        train_aug = [
+            transforms.RandomResizedCrop(size, scale=(0.5, 1.0)), # 类似 ImageNet 的 RRC
+        ]
+        print("Dataset with basic VOC2007 augmentation (RRC, Flip)")
+
+    train_cast = [] if from_tensor else [transforms.ToTensor()]
+
+    train_normal_fn = []
+    if normalize:
+        # 假设 voc2007 的均值和标准差已在 dataset_statistics 中定义
+        try:
+            mean = MEANS["voc2007"]
+            std = STDS["voc2007"]
+            train_normal_fn = [transforms.Normalize(mean=mean, std=std)]
+        except KeyError:
+            print("Warning: MEANS['voc2007'] or STDS['voc2007'] not found. Skipping normalization.")
+            train_normal_fn = []
+
+
+    # --- 测试集/验证集转换 ---
+    # 通常测试集只做 Resize 和 CenterCrop
+    test_resize = [
+        transforms.Resize(int(size * 256 / 224)), # 保持 ImageNet 比例
+        transforms.CenterCrop(size),
+    ]
+    test_cast = [] if from_tensor else [transforms.ToTensor()]
+    test_normal_fn = train_normal_fn # 使用与训练集相同的归一化
+
+    # --- 组合转换 ---
+    train_transform = transforms.Compose(train_cast + train_aug + train_normal_fn)
+    test_transform = transforms.Compose(test_resize + test_cast + test_normal_fn)
+
+    return train_transform, test_transform

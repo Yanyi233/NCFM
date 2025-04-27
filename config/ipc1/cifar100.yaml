@@ -2,7 +2,7 @@ distibution_train:
   backend: 'nccl' #  choices=['nccl', 'gloo', 'mpi', 'torch']
   init_method: 'env://'
   workers: 8
-  
+
 dataset:
   dataset: cifar100
   nclass: 100
@@ -45,7 +45,7 @@ augmentation:
 optimization:
   optimizer: adamw
   lr_scale_adam: 0.1
-  lr_img: 0.01  
+  lr_img: 0.01 
   mom_img: 0.5
   lr_sampling_net: 1e-3
 

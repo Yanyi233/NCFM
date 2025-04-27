@@ -69,7 +69,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--val_repeat",
         type=int,
-        default=10,
+        default=1,
         help="The times of validation on syn_dataset Imagenet only 3 times",
     )
     parser.add_argument(

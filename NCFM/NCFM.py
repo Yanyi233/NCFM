@@ -4,14 +4,17 @@ import torch.nn.functional as F
 
 
 def calculate_norm(x_r, x_i):
+    # 根据实部和虚部，计算幅度
     return torch.sqrt(torch.mul(x_r, x_r) + torch.mul(x_i, x_i))
 
 
 def calculate_imag(x):
+    # 计算虚部
     return torch.mean(torch.sin(x), dim=1)
 
 
 def calculate_real(x):
+    # 计算实部
     return torch.mean(torch.cos(x), dim=1)
 
 

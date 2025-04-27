@@ -23,8 +23,8 @@ def main_worker(args):
     else:
         sampling_net = None
         optim_sampling_net = None
-    model_init,model_interval,model_final = get_feature_extractor(args)
-    condenser.condense(args,plotter,loader_real,aug,optim_img,model_init,model_interval,model_final,sampling_net,optim_sampling_net)
+    model_init, model_interval, model_final = get_feature_extractor(args)
+    condenser.condense(args, plotter, loader_real, aug,optim_img, model_init, model_interval, model_final, sampling_net, optim_sampling_net)
 
     dist.destroy_process_group()
 

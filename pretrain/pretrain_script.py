@@ -38,7 +38,6 @@ def count_existing_models(pretrain_dir):
 
 def main_worker(args):
     train_loader, val_loader, train_sampler = get_loader(args)
-
     for model_id in range(args.model_num):
         if count_existing_models(args.pretrain_dir) >= args.model_num:
             break
@@ -66,23 +65,35 @@ def main_worker(args):
             print(f"Model {model_id} initial state saved at {init_path}")
 
         # Define loss function, optimizer, and scheduler
-        criterion = torch.nn.CrossEntropyLoss().to(args.device)
+        if args.is_multilabel:
+            criterion = torch.nn.BCEWithLogitsLoss().to(args.device)
+            # 定义用于追踪最佳模型的指标 (例如 mAP 或 F1-micro)
+            best_metric_key = 'mAP' # 或者 'f1_micro'
+            best_metric = 0.0       # 初始化为 0 (越高越好)
+            print(f"Using multi-label criterion (BCEWithLogitsLoss) and tracking best '{best_metric_key}'.")
+        else:
+            criterion = torch.nn.CrossEntropyLoss().to(args.device)
+            # 定义用于追踪最佳模型的指标 (例如 Top-1 Accuracy)
+            best_metric_key = 'top1'
+            best_metric = 0.0       # 初始化为 0 (越高越好)
+            print(f"Using single-label criterion (CrossEntropyLoss) and tracking best '{best_metric_key}'.")
+
         optimizer = optim.SGD(
             model.parameters(),
             lr=args.lr,
             momentum=args.momentum,
             weight_decay=args.weight_decay,
-        )
+        ) ## TODO:若改成BERT，可考虑修改成Adam等
         scheduler = optim.lr_scheduler.MultiStepLR(
             optimizer,
-            milestones=[2 * args.pertrain_epochs // 3, 5 * args.pertrain_epochs // 6],
+            milestones=[2 * args.pertrain_epochs // 3, 5 * args.pertrain_epochs // 6], ## 在epoch 2/3和5/6处进行学习率衰减
             gamma=0.2,
         )
         _, aug_rand = diffaug(args)
         for epoch in range(0, args.pertrain_epochs):
             start_time = time.time()
             train_sampler.set_epoch(epoch)
-            train_acc1, train_acc5, train_loss = train_epoch(
+            train_metrics = train_epoch(
                 args,
                 train_loader,
                 model,
@@ -92,14 +103,61 @@ def main_worker(args):
                 aug_rand,
                 mixup=args.mixup,
             )
-            val_acc1, val_acc5, val_loss = validate(val_loader, model, criterion)
+            train_loss = train_metrics['loss']
+
+            # 打印训练指标
+            if args.rank == 0:
+                print(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Training Metrics:")
+                log_str = f"  Loss: {train_loss:.4f}"
+                if args.is_multilabel:
+                    log_str += f" | Prec (micro): {train_metrics.get('prec_micro', 0.0):.4f}"
+                    log_str += f" | Recall (micro): {train_metrics.get('rec_micro', 0.0):.4f}"
+                    log_str += f" | F1 (micro): {train_metrics.get('f1_micro', 0.0):.4f}"
+                    log_str += f" | Hamming: {train_metrics.get('hamming', 0.0):.4f}"
+                else:
+                    log_str += f" | Top-1 Acc: {train_metrics.get('top1', 0.0):.2f}%"
+                    log_str += f" | Top-5 Acc: {train_metrics.get('top5', 0.0):.2f}%"
+                print(log_str)
+
+            val_metrics = validate(args, val_loader, model, criterion)
+            val_loss = val_metrics['loss']
+
+            # 打印验证指标
+            if args.rank == 0:
+                print(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Validation Metrics:")
+                log_str = f"  Loss: {val_loss:.4f}"
+                current_metric = 0.0 # 初始化当前轮次的最佳指标值
+                if args.is_multilabel:
+                    log_str += f" | mAP: {val_metrics.get('mAP', 0.0):.4f}"
+                    log_str += f" | F1 (micro): {val_metrics.get('f1_micro', 0.0):.4f}"
+                    log_str += f" | F1 (macro): {val_metrics.get('f1_macro', 0.0):.4f}"
+                    log_str += f" | Hamming: {val_metrics.get('hamming_loss', 0.0):.4f}"
+                    current_metric = val_metrics.get(best_metric_key, 0.0) # 获取用于比较的指标
+                else:
+                    log_str += f" | Top-1 Acc: {val_metrics.get('top1', 0.0):.2f}%"
+                    log_str += f" | Top-5 Acc: {val_metrics.get('top5', 0.0):.2f}%"
+                    current_metric = val_metrics.get(best_metric_key, 0.0) # 获取用于比较的指标
+                print(log_str)
+
             epoch_time = time.time() - start_time
             if args.rank == 0:
-                args.logger(
-                    "<Pretraining {:2d}-th model>...[Epoch {:2d}] Train acc: {:.1f} (loss: {:.3f}), Val acc: {:.1f}, Time: {:.2f} seconds".format(
-                        model_id, epoch, train_acc1, train_loss, val_acc1, epoch_time
+                if args.is_multilabel:
+                    args.logger(
+                        "<Pretraining {:2d}-th model>...[Epoch {:2d}] Train P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}, Val P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}, Time: {:.2f} seconds".format(
+                            model_id, epoch, 
+                            train_metrics.get('prec_micro', 0.0), train_metrics.get('rec_micro', 0.0), 
+                            train_metrics.get('f1_micro', 0.0), train_metrics.get('hamming', 0.0), train_metrics.get('mAP', 0.0),
+                            val_metrics.get('prec_micro', 0.0), val_metrics.get('rec_micro', 0.0), 
+                            val_metrics.get('f1_micro', 0.0), val_metrics.get('hamming', 0.0), val_metrics.get('mAP', 0.0),
+                            epoch_time
+                        )
                     )
-                )
+                else:
+                    args.logger(
+                        "<Pretraining {:2d}-th model>...[Epoch {:2d}] Train acc: {:.1f} (loss: {:.3f}), Val acc: {:.1f}, Time: {:.2f} seconds".format(
+                            model_id, epoch, train_metrics.get('top1', 0.0), train_loss, val_metrics.get('top1', 0.0), epoch_time
+                        )
+                    )
             scheduler.step()
 
         # Save trained model state

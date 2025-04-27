@@ -2,8 +2,8 @@
 # Values borrowed from https://github.com/VICO-UoE/DatasetCondensation/blob/master/utils.py
 
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
-MEANS = {'cifar': [0.4914, 0.4822, 0.4465], 'imagenet': [0.485, 0.456, 0.406]}
-STDS = {'cifar': [0.2023, 0.1994, 0.2010], 'imagenet': [0.229, 0.224, 0.225]}
+MEANS = {'cifar': [0.4914, 0.4822, 0.4465], 'imagenet': [0.485, 0.456, 0.406], 'voc2007': [0, 0, 0]}
+STDS = {'cifar': [0.2023, 0.1994, 0.2010], 'imagenet': [0.229, 0.224, 0.225], 'voc2007': [1, 1, 1]}
 MEANS['cifar10'] = MEANS['cifar']
 STDS['cifar10'] = STDS['cifar']
 MEANS['cifar100'] = MEANS['cifar']

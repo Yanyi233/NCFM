@@ -5,6 +5,7 @@ from data.transform import (
     transform_mnist,
     transform_fashion,
     transform_tiny,
+    transform_voc2007,
 )
 
 
@@ -44,6 +45,8 @@ def get_train_transform(
         train_transform, _ = transform_fashion(augment=augment, from_tensor=from_tensor)
     elif dataset == "tinyimagenet":
         train_transform, _ = transform_tiny(augment=augment, from_tensor=from_tensor)
+    elif dataset == "voc2007":
+        train_transform, _ = transform_voc2007(augment=augment, from_tensor=from_tensor)
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
 

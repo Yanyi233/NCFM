@@ -154,16 +154,24 @@ class Condenser:
         data_dec = []
         target_dec = []
         for c in self.nclass_list:
-            target_mask = self.targets == c
+            if args.is_multilabel:
+                # 对于多标签情况，检查targets中第c个位置是否为1
+                target_mask = self.targets[:, c] == 1
+            else:
+                # 对于单标签情况，保持原有逻辑
+                target_mask = self.targets == c
             data = self.data[target_mask].detach()
             target = self.targets[target_mask].detach()
-            # data, target = self.decode(data, target)
+            # # 如果样本数量超过factor，则随机选择factor个样本
+            # if len(data) > self.factor:
+            #     indices = torch.randperm(len(data))[:self.factor]
+            #     data = data[indices]
+            #     target = target[indices]
             data, target = decode(
                 self.decode_type, self.size, data, target, self.factor, bound=10000
             )
-
-            data_dec.append(data)
-            target_dec.append(target)
+            data_dec.append(data.cpu())
+            target_dec.append(target.cpu())
 
         data_dec = torch.cat(data_dec)
         target_dec = torch.cat(target_dec)
@@ -174,12 +182,12 @@ class Condenser:
         train_sampler = DistributedSampler(
             train_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=True
         )
-        # train_loader = DataLoader(train_dataset,batch_size=int(args.batch_size/args.world_size),sampler=train_sampler,num_workers=nw)
         train_loader = MultiEpochsDataLoader(
             train_dataset,
             batch_size=int(args.batch_size / args.world_size),
             sampler=train_sampler,
             num_workers=nw,
+            pin_memory=True
         )
         return train_loader
 
@@ -218,15 +226,10 @@ class Condenser:
         for it in range(args.niter):
             model_init, model_final, model_interval = update_feature_extractor(
                 args, model_init, model_final, model_interval, a=0, b=1
-            )
+            ) # 都来源于预训练的模型，分别是初始化的模型、预训练结束的模型，根据一个随机0-1的值线性组合得到的两个模型的中间模型
 
             self.data.data = torch.clamp(self.data.data, min=0.0, max=1.0)
-            match_loss_total, match_grad_mean, calib_loss_total, calib_grad_mean = (
-                0,
-                0,
-                0,
-                0,
-            )
+            match_loss_total, match_grad_mean, calib_loss_total, calib_grad_mean = 0, 0, 0, 0
             match_loss_total, match_grad_mean = compute_match_loss(
                 args,
                 loader_real=loader_real,

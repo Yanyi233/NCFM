@@ -19,6 +19,7 @@ def compute_match_loss(
     loss_total = 0
     match_grad_mean = 0
 
+    # 这里是按类别进行的，class wise
     for c in class_list:
         timing_tracker.start_step()
 
@@ -30,7 +31,7 @@ def compute_match_loss(
         timing_tracker.record("aug")
         n = img.shape[0]
 
-        loss = inner_loss_fn(img_aug[:n], img_aug[n:], model_interval,sampling_net,args)
+        loss = inner_loss_fn(img_aug[:n], img_aug[n:], model_interval, args)
         loss_total += loss.item()
         timing_tracker.record("loss")
 
