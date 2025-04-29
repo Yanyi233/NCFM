@@ -124,10 +124,12 @@ class SimpleCNN(nn.Module):
         return x
 
 # --- 初始化模型、损失函数、优化器 ---
-model = models.resnet34(pretrained=True)
+model = models.resnet18(pretrained=True)
 model.fc = nn.Linear(model.fc.in_features, NUM_CLASSES)
+print(model)
 model = model.to(DEVICE)
 
+input()
 # 损失函数：BCEWithLogitsLoss，适用于多标签分类问题
 # 它结合了 Sigmoid 层和二元交叉熵损失，数值上更稳定
 criterion = nn.BCEWithLogitsLoss()

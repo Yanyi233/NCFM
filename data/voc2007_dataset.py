@@ -17,7 +17,7 @@ class VOC2007_PT_Dataset(Dataset):
         print(f"Loading VOC2007 data from {pt_file_path}...")
         try:
             # map_location='cpu' to avoid loading directly onto GPU potentially causing OOM
-            self.data_dict = torch.load(pt_file_path, map_location='cpu')
+            self.data_dict = torch.load(pt_file_path, map_location='cpu', weights_only=True)
         except Exception as e:
             raise RuntimeError(f"Error loading {pt_file_path}: {e}")
 

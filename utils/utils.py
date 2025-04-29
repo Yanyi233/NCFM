@@ -20,12 +20,15 @@ import models.resnet as RN
 import models.resnet_ap as RNAP
 import models.convnet as CN
 import models.densenet_cifar as DN
+import models.resnet18_pretrain as RN18_PRETRAIN
 # from efficientnet_pytorch import EfficientNet
 from torchvision import datasets, transforms
 from data.transform import transform_imagenet
 from data.dataset import ImageFolder, ImageFolder_mtt
 from data.dataset_statistics import MEANS, STDS
 from data.voc2007_dataset import VOC2007_PT_Dataset
+
+import torchvision.models
 
 
 class BlurPoolConv2d(torch.nn.Module):
@@ -60,7 +63,9 @@ def apply_blurpool(mod: torch.nn.Module):
 
 def define_model(dataset, norm_type, net_type, nch, depth, width, nclass, logger, size):
     ## TODO:看是否需要添加新的模型类型，如BERT等
-    if net_type == "resnet":
+    if net_type == 'resnet18':
+        model = RN18_PRETRAIN.ResNet18WithFeatures(num_classes=nclass, pretrained=True)
+    elif net_type == "resnet":
         model = RN.ResNet(
             dataset, depth, nclass, norm_type=norm_type, size=size, nch=nch
         )

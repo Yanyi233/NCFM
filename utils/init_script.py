@@ -24,7 +24,7 @@ def init_script(args):
     args.it_save, args.it_log = set_iteration_parameters(args.niter, args.debug)
 
     args.pretrain_dir = set_Pretrain_Directory(
-        args.pretrain_dir, args.dataset, args.depth
+        args.pretrain_dir, args.dataset, args.depth, args.ipc, args.net_type
     )
 
     args.exp_name, args.save_dir, args.lr_img = set_experiment_name_and_save_Dir(
@@ -70,12 +70,13 @@ def set_iteration_parameters(niter, debug):
     return it_save, it_log
 
 
-def set_Pretrain_Directory(pretrain_dir, dataset, depth):
-
+def set_Pretrain_Directory(pretrain_dir, dataset, depth, ipc, net_type):
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    
     if dataset.lower() == "imagenet":
-        pretrain_dir = f"./{pretrain_dir}/{dataset}/ResNet-{depth}"
+        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/ResNet-{depth}_{timestamp}"
     else:
-        pretrain_dir = f"./{pretrain_dir}/{dataset}"
+        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/{net_type}_{timestamp}"
     return pretrain_dir
 
 

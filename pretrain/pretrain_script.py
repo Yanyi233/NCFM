@@ -12,6 +12,53 @@ from utils.utils import get_loader
 from utils.train_val import train_epoch, validate
 from utils.diffaug import diffaug
 
+def check_args(args):
+    # 检查args中是否有define_model使用到的参数，如果没有则设置缺省值
+    if not hasattr(args, 'dataset'):
+        args.dataset = 'cifar10'  # 默认数据集
+        if args.rank == 0:
+            print(f"Warning: 'dataset' not found in args, using default: {args.dataset}")
+    
+    if not hasattr(args, 'norm_type'):
+        args.norm_type = 'batch'  # 默认归一化类型
+        if args.rank == 0:
+            print(f"Warning: 'norm_type' not found in args, using default: {args.norm_type}")
+    
+    if not hasattr(args, 'net_type'):
+        args.net_type = 'resnet'  # 默认网络类型
+        if args.rank == 0:
+            print(f"Warning: 'net_type' not found in args, using default: {args.net_type}")
+    
+    if not hasattr(args, 'nch'):
+        args.nch = 3  # 默认通道数
+        if args.rank == 0:
+            print(f"Warning: 'nch' not found in args, using default: {args.nch}")
+    
+    if not hasattr(args, 'depth'):
+        args.depth = 18  # 默认网络深度
+        if args.rank == 0:
+            print(f"Warning: 'depth' not found in args, using default: {args.depth}")
+    
+    if not hasattr(args, 'width'):
+        args.width = 1.0  # 默认网络宽度
+        if args.rank == 0:
+            print(f"Warning: 'width' not found in args, using default: {args.width}")
+    
+    if not hasattr(args, 'nclass'):
+        args.nclass = 10  # 默认类别数
+        if args.rank == 0:
+            print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
+    
+    if not hasattr(args, 'size'):
+        args.size = 32  # 默认图像大小
+        if args.rank == 0:
+            print(f"Warning: 'size' not found in args, using default: {args.size}")
+    
+    if not hasattr(args, 'is_multilabel'):
+        args.is_multilabel = False  # 默认为单标签分类
+        if args.rank == 0:
+            print(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
+    return args
 
 def get_available_model_id(pretrain_dir, model_id):
     while True:
@@ -44,6 +91,7 @@ def main_worker(args):
         model_id = get_available_model_id(args.pretrain_dir, model_id)
         if args.rank == 0:
             print(f"Training model {model_id + 1}/{args.model_num}")
+        args = check_args(args) ## 检查args中是否有define_model使用到的参数，如果没有则设置缺省值
         model = define_model(
             args.dataset,
             args.norm_type,
