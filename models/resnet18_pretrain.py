@@ -31,10 +31,36 @@ class ResNet18WithFeatures(nn.Module):
         # 将修改后的 fc 层也赋给内部的 resnet 实例（可选，但保持一致性）
         self.resnet.fc = self.fc
 
-    def forward(self, x):
-        # 标准的前向传播，直接调用内部 resnet 实例
-        return self.resnet(x)
+    def forward(self, x, return_features=False):
+        """
+        可以根据 return_features 标志选择性地返回 avgpool 后的特征。
+        """
+        # Layer 0
+        x = self.layer0_conv1(x)
+        x = self.layer0_bn1(x)
+        x = self.layer0_relu(x)
+        x = self.layer0_maxpool(x)
 
+        # Layer 1-4
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        # Global AvgPool and Flatten
+        features_before_fc = self.avgpool(x)
+        features_before_fc = torch.flatten(features_before_fc, 1) # (batch_size, num_features)
+
+        # Final FC layer (Logits)
+        out = self.fc(features_before_fc)
+
+        if return_features:
+            # 返回 logits 和 avgpool 后展平的特征
+            return out, features_before_fc
+        else:
+            # 只返回 logits
+            return out
+        
     def get_feature_mutil(self, x):
         """
         执行前向传播并收集指定中间层的特征。

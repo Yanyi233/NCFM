@@ -23,9 +23,10 @@ def init_script(args):
 
     args.it_save, args.it_log = set_iteration_parameters(args.niter, args.debug)
 
-    args.pretrain_dir = set_Pretrain_Directory(
-        args.pretrain_dir, args.dataset, args.depth, args.ipc, args.net_type
-    )
+    # 由于加入了timestamp，所以需要重新设置pretrain_dir，暂时考虑只用绝对路径
+    # args.pretrain_dir = set_Pretrain_Directory(
+    #     args.pretrain_dir, args.dataset, args.depth, args.ipc, args.net_type
+    # )
 
     args.exp_name, args.save_dir, args.lr_img = set_experiment_name_and_save_Dir(
         args.run_mode,

@@ -1,3 +1,51 @@
+def check_args(args):
+    # 检查args中是否有define_model使用到的参数，如果没有则设置缺省值
+    if not hasattr(args, 'dataset'):
+        args.dataset = 'cifar10'  # 默认数据集
+        if args.rank == 0:
+            print(f"Warning: 'dataset' not found in args, using default: {args.dataset}")
+    
+    if not hasattr(args, 'norm_type'):
+        args.norm_type = 'batch'  # 默认归一化类型
+        if args.rank == 0:
+            print(f"Warning: 'norm_type' not found in args, using default: {args.norm_type}")
+    
+    if not hasattr(args, 'net_type'):
+        args.net_type = 'resnet'  # 默认网络类型
+        if args.rank == 0:
+            print(f"Warning: 'net_type' not found in args, using default: {args.net_type}")
+    
+    if not hasattr(args, 'nch'):
+        args.nch = 3  # 默认通道数
+        if args.rank == 0:
+            print(f"Warning: 'nch' not found in args, using default: {args.nch}")
+    
+    if not hasattr(args, 'depth'):
+        args.depth = 18  # 默认网络深度
+        if args.rank == 0:
+            print(f"Warning: 'depth' not found in args, using default: {args.depth}")
+    
+    if not hasattr(args, 'width'):
+        args.width = 1.0  # 默认网络宽度
+        if args.rank == 0:
+            print(f"Warning: 'width' not found in args, using default: {args.width}")
+    
+    if not hasattr(args, 'nclass'):
+        args.nclass = 10  # 默认类别数
+        if args.rank == 0:
+            print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
+    
+    if not hasattr(args, 'size'):
+        args.size = 32  # 默认图像大小
+        if args.rank == 0:
+            print(f"Warning: 'size' not found in args, using default: {args.size}")
+    
+    if not hasattr(args, 'is_multilabel'):
+        args.is_multilabel = False  # 默认为单标签分类
+        if args.rank == 0:
+            print(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
+    return args
+
 def main_worker(args):
     
     args.class_list = distribute_class(args.nclass,args.debug)
@@ -23,6 +71,7 @@ def main_worker(args):
     else:
         sampling_net = None
         optim_sampling_net = None
+    args = check_args(args)
     model_init, model_interval, model_final = get_feature_extractor(args)
     condenser.condense(args, plotter, loader_real, aug,optim_img, model_init, model_interval, model_final, sampling_net, optim_sampling_net)
 
