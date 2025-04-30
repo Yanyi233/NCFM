@@ -146,9 +146,9 @@ def check_data(data_path, name=""):
 
 if __name__ == "__main__":
     # 检查原始数据
-    ORIGINAL_DATA_PATH = '/home/wjh/DC/data/VOC2007/VOC2007.pt'
-    check_data(ORIGINAL_DATA_PATH, "原始")
+    # ORIGINAL_DATA_PATH = '/home/wjh/DC/data/VOC2007/VOC2007.pt'
+    # check_data(ORIGINAL_DATA_PATH, "原始")
     
     # 检查蒸馏数据
-    DISTILLED_DATA_PATH = 'results/condense/condense/voc2007/ipc10/adamw_lr_img_0.0010_numr_reqs4096_factor2_20250421-0852/distilled_data/data_20000.pt'
+    DISTILLED_DATA_PATH = '/home/wjh/NCFM/results/condense/condense/voc2007/ipc10/adamw_lr_img_0.0010_numr_reqs4096_factor2_20250429-0141/converted_data/converted_20000.pt'
     check_data(DISTILLED_DATA_PATH, "蒸馏") 
