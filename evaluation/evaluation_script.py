@@ -106,5 +106,5 @@ if __name__ == "__main__":
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
 
     init_script(args)
-
+    args.logger("args: {}".format(args))
     main_work(args)

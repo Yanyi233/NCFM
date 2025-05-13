@@ -95,7 +95,7 @@ def train_epoch(
         if args.is_multilabel:
             with torch.no_grad():
                 scores = torch.sigmoid(output.data)
-                preds = (scores > 0.5).cpu().numpy().astype(int)
+                preds = (scores > 0.35).cpu().numpy().astype(int)
                 targets_np = target.cpu().numpy().astype(int)
 
                 batch_prec_micro = precision_score(targets_np, preds, average='micro', zero_division=0)

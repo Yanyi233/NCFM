@@ -20,7 +20,7 @@ network:
   net_type: resnet18         # 使用resnet18
   norm_type: batch          # 使用 batch (或 instance)
   depth: 18                 
-  layer_index: [1, 2, 3, 4, 5, 6]
+  layer_index: [1, 3, 5, 6]
   width: 1.0                # 在resnet18中，不使用该参数
 
 # 训练配置 (用于 Pretrain 和 Evaluation)
@@ -30,8 +30,8 @@ train:
   epoch_eval_interval: 10    # 评估间隔 (轮)
   pertrain_epochs: 60       # 预训练模式下的轮数 (根据需要调整)
   batch_size: 128            # 预训练/评估时的训练批次大小 (会被 world_size 除)
-  lr: 0.01                  # 学习率 (Adam/AdamW 通常较低)
-  adamw_lr: 0.001            # 如果 eval_optimizer 是 adamw
+  lr: 0.01                  # 学习率
+  adamw_lr: 0.0001            # 如果 eval_optimizer 是 adamw
   eval_optimizer: adamw      # 评估时使用的优化器 (adam 或 sgd)
   momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)
   weight_decay: 5e-4        # 权重衰减 (AdamW 需要)
@@ -59,13 +59,13 @@ optimization:
 # 保存路径配置
 save_path:
   save_dir: "../results/condense" # 结果保存目录 (建议包含数据集和ipc)
-  pretrain_dir: '../pretrained_models/voc2007/ipc10/resnet18_20250429-0823' # 预训练模型保存目录
+  pretrain_dir: '../pretrained_models/voc2007/ipc10/resnet18_20250428-0847' # 预训练模型保存目录
 
 # 蒸馏 (Condense) 配置
 condense:
   ipc: 10                   # 每个类别的图像数
   num_premodel: 10          # 使用的预训练模型数量 (应 <= train.model_num)
-  niter: 20000               # 蒸馏迭代次数 (outer_loop)
+  niter: 2000               # 蒸馏迭代次数 (outer_loop)
   iter_calib: 1             # 校准迭代次数
   calib_weight: 1           # 校准权重
   sampling_net: False       # 是否使用采样网络
@@ -75,4 +75,4 @@ condense:
   alpha_for_loss: 0.5       # NCFM 损失 alpha
   beta_for_loss: 0.5        # NCFM 损失 beta
   decode_type: 'single'     # 解码类型 (single, multi, bound)
-  teacher_model_epoch: 20   # 使用哪个 epoch 的教师模型 
+  teacher_model_epoch: 20   # 使用哪个 epoch 的教师模型

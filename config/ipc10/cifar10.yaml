@@ -51,12 +51,12 @@ optimization:
 
 save_path:
   save_dir: "../results/condense"
-  pretrain_dir: '../pretrained_models'
+  pretrain_dir: '../pretrained_models/cifar10'
 
 condense:
   ipc: 10
   num_premodel: 20
-  niter: 20000
+  niter: 2000
   iter_calib: 1 
   calib_weight: 1
   sampling_net: False

@@ -85,7 +85,11 @@ def mutil_layer_match_loss(img_real, img_syn, model, args=None):
     assert isinstance(
         args.layer_index, list
     ), "args.layer_index must be a list of layer indices"
-
+    # 第一次调用时打印提示信息
+    # if not hasattr(mutil_layer_match_loss, 'has_been_called'):
+    #     print("多层特征匹配损失函数已激活，将使用以下层索引进行特征匹配：", args.layer_index)
+    #     mutil_layer_match_loss.has_been_called = True
+    
     # Initialize loss as a tensor on the correct device
     loss = torch.tensor(0.0).to(img_real.device)
 
@@ -110,7 +114,7 @@ def mutil_layer_match_loss(img_real, img_syn, model, args=None):
             feat = F.normalize(feat, dim=1)  # Normalize the feature
             feat_tg = F.normalize(feat_tg, dim=1)  # Normalize the target feature
             t = None  # Adjust this based on your CFLossFunc usage
-            loss += 300 * args.cf_loss_func(feat_tg, feat, t, args)
+            loss += 300 * args.cf_loss_func(feat_tg, feat, t, args) / len(args.layer_index)
 
     return loss
 

@@ -8,6 +8,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 import torch.nn.functional as F
+import random
 
 
 class _RepeatSampler(object):
@@ -440,8 +441,8 @@ class MultiLabelClassDataLoader(MultiEpochsDataLoader):
         if ipc > 0:
             num_samples_in_class = len(self.cls_idx[c])
             indices = self.cls_idx[c][:min(ipc, num_samples_in_class)]
-            if len(indices) < ipc:
-                 print(f"Warning: Requested {ipc} samples for class {c}, but only {len(indices)} available.")
+            # if len(indices) < ipc:
+            #      print(f"Warning: Requested {ipc} samples for class {c}, but only {len(indices)} available.")
             if not indices:
                  raise ValueError(f"Cannot sample {ipc} samples for class {c}, as it has no samples.")
         else:
@@ -584,9 +585,9 @@ class MultiLabelClassMemDataLoader:
 
         if ipc > 0:
             num_samples_in_class = len(self.cls_idx[c])
-            indices = self.cls_idx[c][:min(ipc, num_samples_in_class)]
-            if len(indices) < ipc:
-                 print(f"Warning: Requested {ipc} samples for class {c}, but only {len(indices)} available.")
+            indices = random.sample(self.cls_idx[c], min(ipc, num_samples_in_class)) # 改成随机采样
+            # if len(indices) < ipc:
+            #      print(f"Warning: Requested {ipc} samples for class {c}, but only {len(indices)} available.")
             if not indices:
                  raise ValueError(f"Cannot sample {ipc} samples for class {c}, as it has no samples.")
         else:

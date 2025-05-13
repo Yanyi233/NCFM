@@ -81,7 +81,7 @@ def process_distilled_data(input_path, output_path, num_classes=20):
         print("Error: Unexpected data format")
 
 if __name__ == "__main__":
-    base_dir = "/home/wjh/NCFM/results/condense/condense/voc2007/ipc10/adamw_lr_img_0.0010_numr_reqs4096_factor2_20250429-0823"
+    base_dir = "/home/wjh/NCFM/results/condense/condense/voc2007/ipc10/adamw_lr_img_0.0010_numr_reqs4096_factor2_20250509-0620"
     input_dir = os.path.join(base_dir, "distilled_data")
     
     # 创建输出目录（与distilled_data同级）

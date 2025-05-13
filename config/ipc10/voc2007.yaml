@@ -24,7 +24,7 @@ network:
 
 # 训练配置 (用于 Pretrain 和 Evaluation)
 train:
-  evaluation_epochs: 200     # 评估模式下的训练轮数
+  evaluation_epochs: 100     # 评估模式下的训练轮数
   epoch_print_freq: 10      # 打印频率
   epoch_eval_interval: 10    # 评估间隔 (轮)
   pertrain_epochs: 60       # 预训练模式下的轮数 (根据需要调整)
