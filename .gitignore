@@ -6,3 +6,4 @@ pretrained_models
 dataset
 test/
 models/model/
+*.pt
