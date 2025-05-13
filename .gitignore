@@ -4,6 +4,6 @@ dataset/
 *.pyc
 pretrained_models
 dataset
-test/
+# test/
 models/model/
 *.pt
