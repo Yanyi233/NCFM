@@ -93,13 +93,13 @@ def define_model(dataset, norm_type, net_type, nch, depth, width, nclass, logger
         raise Exception("unknown network architecture: {}".format(net_type))
     return model
 
-# def define_language_model(num_classes):
-#     ## TODO:看是否需要添加新的模型类型，如BERT等
-#     if net_type == 'BERT':
-#         model = BERT.BERTWithFeatures(num_classes=num_classes)
-#     else:
-#         raise Exception("unknown network architecture: {}".format(net_type))
-#     return model
+def define_language_model(net_type, num_classes):
+    ## TODO:看是否需要添加新的模型类型，如BERT等
+    if net_type == 'BERT':
+        model = BERT.BERTWithFeatures(num_classes=num_classes)
+    else:
+        raise Exception("unknown network architecture: {}".format(net_type))
+    return model
 
 def load_resized_data(
     dataset, data_dir, size=None, nclass=None, load_memory=False, seed=0
@@ -370,6 +370,9 @@ def get_optimizer(optimizer: str= "sgd", parameters=None,lr=0.01, mom_img=0.5,we
 
 
 def get_loader(args):
+    if args.dataset == "reuters":
+        return get_reuters_loader(args)
+    
     # 首先加载数据集对象
     train_dataset, val_dataset, is_multilabel = load_resized_data(
         args.dataset,
@@ -570,3 +573,210 @@ def update_feature_extractor(args, model_init, model_final, model_interval, a=0,
         load_state_dict(interval_path, model_interval)
 
     return model_init, model_final, model_interval
+
+
+def load_reuters_data(data_dir, max_length=512, text_column='sentence', label_column='labels'):
+    """
+    加载Reuters数据集并进行预处理
+    
+    Args:
+        data_dir: 数据集目录路径
+        max_length: BERT最大序列长度
+        text_column: 文本列名
+        label_column: 标签列名
+    
+    Returns:
+        train_dataset, val_dataset, is_multilabel
+    """
+    from datasets import load_dataset
+    from transformers import AutoTokenizer
+    
+    # 定义数据文件路径
+    data_files = {
+        'train': os.path.join(data_dir, 'training_data.csv'),
+        'test': os.path.join(data_dir, 'test_data.csv'),
+        'validation': os.path.join(data_dir, 'val_data.csv')
+    }
+    
+    # 检查文件是否存在
+    for split, file_path in data_files.items():
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"找不到{split}数据集文件: {file_path}")
+    
+    # 加载数据集
+    datasets = load_dataset("csv", data_files=data_files)
+    
+    # 检查必要的列是否存在
+    all_column_names = datasets['train'].column_names
+    if text_column not in all_column_names:
+        raise ValueError(f"文本列 '{text_column}' 未在数据集中找到。可用列: {all_column_names}")
+    if label_column not in all_column_names:
+        raise ValueError(f"标签列 '{label_column}' 未在数据集中找到。可用列: {all_column_names}")
+    
+    # 获取类别数
+    num_classes = len(eval(datasets['train'][0][label_column]))
+    
+    # 初始化tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("/home/wjh/NCFM/models/model/bert-base-uncased")
+    
+    # 定义预处理函数
+    def preprocess_function(examples):
+        # 编码文本
+        tokenized_inputs = tokenizer(
+            examples[text_column],
+            truncation=True,
+            padding='max_length',
+            max_length=max_length,
+        )
+        
+        # 处理标签
+        labels_batch = []
+        for label_str in examples[label_column]:
+            label_list = eval(label_str) if isinstance(label_str, str) else label_str
+            labels_batch.append(label_list)
+        
+        tokenized_inputs["labels"] = torch.tensor(labels_batch, dtype=torch.float32)
+        return tokenized_inputs
+    
+    # 应用预处理
+    tokenized_datasets = datasets.map(
+        preprocess_function,
+        batched=True,
+        remove_columns=[text_column, label_column]
+    )
+    
+    # 设置数据集格式为PyTorch张量
+    tokenized_datasets.set_format("torch")
+    
+    # 设置数据集属性
+    tokenized_datasets['train'].nclass = num_classes
+    tokenized_datasets['validation'].nclass = num_classes
+    tokenized_datasets['test'].nclass = num_classes
+    
+    return tokenized_datasets['train'], tokenized_datasets['validation'], True
+
+def get_reuters_loader(args):
+    """
+    为Reuters数据集创建DataLoader
+    
+    Args:
+        args: 包含配置参数的对象
+    
+    Returns:
+        根据run_mode返回相应的DataLoader
+    """
+    # 加载数据集
+    train_dataset, val_dataset, is_multilabel = load_reuters_data(
+        args.data_dir,
+        max_length=args.max_length if hasattr(args, 'max_length') else 512,
+        text_column=args.text_column if hasattr(args, 'text_column') else 'sentence',
+        label_column=args.label_column if hasattr(args, 'label_column') else 'labels'
+    )
+    
+    # 设置多标签标志
+    args.is_multilabel = is_multilabel
+    
+    # 动态更新args中的nclass
+    args.nclass = train_dataset.nclass
+    
+    # 定义collate函数
+    def collate_fn(batch):
+        batch_dict = {}
+        
+        # 处理所有非标签键
+        if "input_ids" in batch[0]:
+            batch_dict["input_ids"] = torch.stack([example["input_ids"] for example in batch])
+        if "attention_mask" in batch[0]:
+            batch_dict["attention_mask"] = torch.stack([example["attention_mask"] for example in batch])
+        if "token_type_ids" in batch[0]:
+            batch_dict["token_type_ids"] = torch.stack([example["token_type_ids"] for example in batch])
+            
+        # 处理标签
+        if "labels" in batch[0]:
+            if isinstance(batch[0]["labels"], torch.Tensor):
+                batch_dict["labels"] = torch.stack([example["labels"] for example in batch])
+            else:
+                batch_dict["labels"] = torch.tensor([example["labels"] for example in batch], dtype=torch.float32)
+                
+        return batch_dict
+    
+    # 根据run_mode创建DataLoader
+    if args.run_mode == "Condense":
+        # 使用MultiLabelClassDataLoader进行类别采样
+        loader_real = MultiLabelClassDataLoader(
+            train_dataset,
+            batch_size=args.batch_real,
+            num_workers=args.workers,
+            shuffle=True,
+            pin_memory=True,
+            drop_last=True,
+            collate_fn=collate_fn
+        )
+        return loader_real, None
+        
+    elif args.run_mode == "Evaluation":
+        if val_dataset is None:
+            raise ValueError("验证数据集加载失败")
+            
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=args.world_size,
+            rank=args.rank,
+            shuffle=False
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=int(args.batch_size / args.world_size),
+            sampler=val_sampler,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False,
+            collate_fn=collate_fn
+        )
+        return None, val_loader
+        
+    elif args.run_mode == "Pretrain":
+        if train_dataset is None or val_dataset is None:
+            raise ValueError("训练或验证数据集加载失败")
+            
+        # 验证集加载器
+        val_sampler = DistributedSampler(
+            val_dataset,
+            num_replicas=args.world_size,
+            rank=args.rank,
+            shuffle=False
+        )
+        
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=int(args.batch_size / args.world_size),
+            sampler=val_sampler,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=False,
+            collate_fn=collate_fn
+        )
+        
+        # 训练集加载器
+        train_sampler = DistributedSampler(
+            train_dataset,
+            num_replicas=args.world_size,
+            rank=args.rank,
+            shuffle=True
+        )
+        
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=int(args.batch_size / args.world_size),
+            sampler=train_sampler,
+            num_workers=args.workers,
+            pin_memory=True,
+            drop_last=True,
+            collate_fn=collate_fn
+        )
+        
+        return train_loader, val_loader, train_sampler
+        
+    else:
+        raise ValueError(f"未知的run_mode: {args.run_mode}")

@@ -9,7 +9,7 @@ dataset:
   dataset: reuters
   nclass: 90                # VOC2007 类别数 (会被动态覆盖)
   # size: 224                 # 图像尺寸 (会被动态覆盖)
-  data_dir: '../dataset'
+  data_dir: '../dataset/reuters'
   load_memory: True        
   batch_real: 256            # Condense 模式下的真实数据批次大小
   # nch: 3                    # 图像通道数
@@ -21,6 +21,7 @@ network:
   norm_type: layernorm          # 使用 batch (或 instance)
   depth: 12                 
   layer_index: [3, 6, 9, 12]
+  length: 512
   # width: 1.0                # 在resnet18中，不使用该参数
 
 # 训练配置 (用于 Pretrain 和 Evaluation)
@@ -45,7 +46,7 @@ augmentation:
   mix_p: 0.5                # Mixup 概率 (如果 mixup != none)
   rrc: False                # 是否使用 RandomResizedCrop (通常用于 ImageNet)
   dsa: False                # 是否使用 DSA
-  dsa_strategy: "" # DSA 策略 (如果 dsa=true)
+  dsa_strategy: ""      # DSA 策略 (如果 dsa=true)
   aug_type: ''          # 基础增强类型 (none, color_crop_cutout, etc.)
 
 # 优化配置 (用于 Condense)
@@ -59,7 +60,7 @@ optimization:
 # 保存路径配置
 save_path:
   save_dir: "../results/condense" # 结果保存目录 (建议包含数据集和ipc)
-  pretrain_dir: '../pretrained_models/voc2007/ipc10/resnet18_20250428-0847' # 预训练模型保存目录
+  pretrain_dir: '../pretrained_models/reuters/ipc10/bert_20250514' # 预训练模型保存目录
 
 # 蒸馏 (Condense) 配置
 condense:

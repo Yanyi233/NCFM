@@ -7,10 +7,10 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import torch.optim as optim
-from utils.utils import define_model
-from utils.utils import get_loader
-from utils.train_val import train_epoch, validate
-from utils.diffaug import diffaug
+from utils.utils_text import define_language_model
+from utils.utils_text import get_loader
+from utils.train_val_text import train_epoch, validate
+# from utils.diffaug import diffaug
 
 def check_args(args):
     # 检查args中是否有define_model使用到的参数，如果没有则设置缺省值
@@ -34,23 +34,18 @@ def check_args(args):
         if args.rank == 0:
             print(f"Warning: 'depth' not found in args, using default: {args.depth}")
     
-    if not hasattr(args, 'width'):
-        args.width = 1.0  # 默认网络宽度
-        if args.rank == 0:
-            print(f"Warning: 'width' not found in args, using default: {args.width}")
-    
     if not hasattr(args, 'nclass'):
-        args.nclass = 10  # 默认类别数
+        args.nclass = 90  # 默认类别数
         if args.rank == 0:
             print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
     
-    if not hasattr(args, 'size'):
-        args.size = 32  # 默认图像大小
+    if not hasattr(args, 'length'):
+        args.length = 512  # 默认文本最大长度
         if args.rank == 0:
-            print(f"Warning: 'size' not found in args, using default: {args.size}")
+            print(f"Warning: 'length' not found in args, using default: {args.length}")
     
     if not hasattr(args, 'is_multilabel'):
-        args.is_multilabel = False  # 默认为单标签分类
+        args.is_multilabel = True  # 默认为多标签分类
         if args.rank == 0:
             print(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
     return args
@@ -86,19 +81,8 @@ def main_worker(args):
         model_id = get_available_model_id(args.pretrain_dir, model_id)
         if args.rank == 0:
             print(f"Training model {model_id + 1}/{args.model_num}")
-        args = check_args(args) ## 检查args中是否有define_model使用到的参数，如果没有则设置缺省值
-        model = define_model(
-            args.dataset,
-            args.norm_type,
-            args.net_type,
-            args.nch,
-            args.depth,
-            args.width,
-            args.nclass,
-            args.logger,
-            args.size,
-        ).to(args.device)
-        model = model.to(args.device)
+        args = check_args(args)
+        model = define_language_model(args.net_type, args.nclass).to(args.device)
         model = DDP(model, device_ids=[args.rank])
 
         # Save initial model state
@@ -121,18 +105,19 @@ def main_worker(args):
             best_metric = 0.0       # 初始化为 0 (越高越好)
             print(f"Using single-label criterion (CrossEntropyLoss) and tracking best '{best_metric_key}'.")
 
-        optimizer = optim.SGD(
+        optimizer = optim.AdamW(
             model.parameters(),
             lr=args.lr,
-            momentum=args.momentum,
-            weight_decay=args.weight_decay,
-        ) ## TODO:若改成BERT，可考虑修改成Adam等
+            # momentum=args.momentum,
+            # weight_decay=args.weight_decay,
+        )
         scheduler = optim.lr_scheduler.MultiStepLR(
             optimizer,
             milestones=[2 * args.pertrain_epochs // 3, 5 * args.pertrain_epochs // 6], ## 在epoch 2/3和5/6处进行学习率衰减
             gamma=0.2,
         )
-        _, aug_rand = diffaug(args)
+        # _, aug_rand = diffaug(args)
+        aug_rand = None
         for epoch in range(0, args.pertrain_epochs):
             start_time = time.time()
             train_sampler.set_epoch(epoch)
@@ -186,7 +171,7 @@ def main_worker(args):
             if args.rank == 0:
                 if args.is_multilabel:
                     args.logger(
-                        "<Pretraining {:2d}-th model>...[Epoch {:2d}] Train P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}, Val P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}, Time: {:.2f} seconds".format(
+                        "<Pretraining {:2d}-th model>...[Epoch {:2d}]\nTrain P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}\nValid P: {:.4f} R: {:.4f} F1: {:.4f} Hamming: {:.4f} mAP: {:.4f}\nTime: {:.2f} seconds".format(
                             model_id, epoch, 
                             train_metrics.get('prec_micro', 0.0), train_metrics.get('rec_micro', 0.0), 
                             train_metrics.get('f1_micro', 0.0), train_metrics.get('hamming', 0.0), train_metrics.get('mAP', 0.0),
@@ -219,6 +204,9 @@ def main():
     from utils.init_script import init_script
     import argparse
     from argsprocessor.args import ArgsProcessor
+
+    # 设置tokenizers的并行处理环境变量
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     parser = argparse.ArgumentParser(description="Configuration parser")
     parser.add_argument(
@@ -261,6 +249,13 @@ def main():
     args = args_processor.add_args_from_yaml(args)
 
     init_script(args)
+
+    # 格式化args输出
+    args_str = "Experiment Configuration:\n"
+    for arg_name, arg_value in sorted(vars(args).items()):
+        if not arg_name.startswith('_'):  # 跳过私有属性
+            args_str += f"  {arg_name}: {arg_value}\n"
+    args.logger(args_str)
 
     main_worker(args)
 
