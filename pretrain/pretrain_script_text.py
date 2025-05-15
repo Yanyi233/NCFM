@@ -82,7 +82,7 @@ def main_worker(args):
         if args.rank == 0:
             print(f"Training model {model_id + 1}/{args.model_num}")
         args = check_args(args)
-        model = define_language_model(args.net_type, args.nclass).to(args.device)
+        model = define_language_model(args.model_path, args.net_type, args.nclass).to(args.device)
         model = DDP(model, device_ids=[args.rank])
 
         # Save initial model state

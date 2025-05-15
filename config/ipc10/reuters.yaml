@@ -17,6 +17,7 @@ dataset:
 
 # 网络配置
 network:
+  model_path: '../models/model/bert-base-uncased'
   net_type: BERT         # 使用resnet18
   norm_type: layernorm          # 使用 batch (或 instance)
   depth: 12                 

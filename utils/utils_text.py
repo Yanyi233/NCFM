@@ -93,10 +93,10 @@ def define_model(dataset, norm_type, net_type, nch, depth, width, nclass, logger
         raise Exception("unknown network architecture: {}".format(net_type))
     return model
 
-def define_language_model(net_type, num_classes):
+def define_language_model(model_path, net_type, num_classes):
     ## TODO:看是否需要添加新的模型类型，如BERT等
     if net_type == 'BERT':
-        model = BERT.BERTWithFeatures(num_classes=num_classes)
+        model = BERT.BERTWithFeatures(num_classes=num_classes, pretrained_model_name=model_path)
     else:
         raise Exception("unknown network architecture: {}".format(net_type))
     return model
@@ -575,7 +575,7 @@ def update_feature_extractor(args, model_init, model_final, model_interval, a=0,
     return model_init, model_final, model_interval
 
 
-def load_reuters_data(data_dir, max_length=512, text_column='sentence', label_column='labels'):
+def load_reuters_data(data_dir, model_path, max_length=512, text_column='sentence', label_column='labels'):
     """
     加载Reuters数据集并进行预处理
     
@@ -617,7 +617,8 @@ def load_reuters_data(data_dir, max_length=512, text_column='sentence', label_co
     num_classes = len(eval(datasets['train'][0][label_column]))
     
     # 初始化tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("/home/wjh/NCFM/models/model/bert-base-uncased")
+    # tokenizer = AutoTokenizer.from_pretrained("/home/wjh/NCFM/models/model/bert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     # 定义预处理函数
     def preprocess_function(examples):
@@ -668,6 +669,7 @@ def get_reuters_loader(args):
     # 加载数据集
     train_dataset, val_dataset, is_multilabel = load_reuters_data(
         args.data_dir,
+        args.model_path,
         max_length=args.max_length if hasattr(args, 'max_length') else 512,
         text_column=args.text_column if hasattr(args, 'text_column') else 'sentence',
         label_column=args.label_column if hasattr(args, 'label_column') else 'labels'

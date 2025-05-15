@@ -3,7 +3,7 @@ import torch.nn as nn
 from transformers import BertModel, BertConfig
 
 class BERTWithFeatures(nn.Module):
-    def __init__(self, num_classes=2, pretrained_model_name='/home/wjh/NCFM/models/model/bert-base-uncased'):
+    def __init__(self, num_classes=2, pretrained_model_name='../models/model/bert-base-uncased'):
         super().__init__()
         self.bert = BertModel.from_pretrained(pretrained_model_name, output_hidden_states=True, local_files_only=True)
         hidden_size = self.bert.config.hidden_size
