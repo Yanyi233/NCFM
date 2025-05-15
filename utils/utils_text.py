@@ -702,8 +702,8 @@ def get_reuters_loader(args):
     
     # 根据run_mode创建DataLoader
     if args.run_mode == "Condense":
-        # 使用MultiLabelClassDataLoader进行类别采样
-        loader_real = MultiLabelClassDataLoader(
+        # 使用MultiLabelClassMemDataLoader进行类别采样
+        loader_real = MultiLabelClassMemDataLoader(
             train_dataset,
             batch_size=args.batch_real,
             num_workers=args.workers,

@@ -374,7 +374,7 @@ class ImageNetMemoryDataLoader:
         targets = targets[indices].to("cuda")  # Move to GPU
         return data, targets  # Ensure targets are also on GPU
 
-
+# 在需要时把数据集从CPU移动到GPU
 class MultiLabelClassDataLoader(MultiEpochsDataLoader):
     """
     Multi-label class loader using multi-hot encoded targets.
@@ -480,7 +480,7 @@ class MultiLabelClassDataLoader(MultiEpochsDataLoader):
         
         return data.cuda(), target.cuda()
 
-
+# 数据集全都存储在GPU中
 class MultiLabelClassMemDataLoader:
     """
     Multi-label class loader with data preloaded on a specified device (e.g., GPU).

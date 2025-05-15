@@ -76,3 +76,4 @@ condense:
   beta_for_loss: 0.5        # NCFM 损失 beta
   decode_type: 'single'     # 解码类型 (single, multi, bound)
   teacher_model_epoch: 20   # 使用哪个 epoch 的教师模型
+  init: 'random'            # 合成数据初始化方式，目前考虑random（真实样本采样）和noise（随机噪声）两种
