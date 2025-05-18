@@ -127,6 +127,9 @@ def set_experiment_name_and_save_Dir(
     # Create save directory if the rank is 0
     if dist.get_rank() == 0:
         os.makedirs(save_dir, exist_ok=True)
+        print('--------------------------------')
+        print(f"Save dir: {save_dir}")
+        print('--------------------------------')
 
     return exp_name, save_dir, lr_img
 
@@ -142,20 +145,34 @@ def set_random_seeds(seed):
 
 
 def setup_logging_and_directories(args, run_mode, save_dir):
+    # 确保所有进程都等待目录创建完成
     if dist.get_rank() == 0:
+        # 创建主目录
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 创建子目录
         if run_mode == "Condense":
             subdirs = ["images", "distilled_data"]
             for subdir in subdirs:
                 os.makedirs(os.path.join(save_dir, subdir), exist_ok=True)
+        
+        # 创建并写入参数日志
         args_log_path = os.path.join(save_dir, "args.log")
         with open(args_log_path, "w") as f:
             json.dump(vars(args), f, indent=3)
+    
+    # 确保所有进程都等待目录创建完成
     dist.barrier()
-    logger = Logger(args.save_dir)
+    
+    # 创建日志记录器
+    logger = Logger(save_dir)
+    
+    # 再次同步所有进程
     dist.barrier()
+    
     if dist.get_rank() == 0:
-        logger(f"Save dir: {args.save_dir}")
-
+        logger(f"Save dir: {save_dir}")
+    
     return logger
 
 

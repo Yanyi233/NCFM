@@ -86,13 +86,13 @@ def gather_save_visualize(synset, args, iteration=None):
         )  # Concatenate targets from all ranks
         args.logger(f"the shape of saved data {all_data.shape}")
         args.logger(f"the shape of saved target {all_targets.shape}")
-        os.makedirs(args.save_dir, exist_ok=True)
-        save_img(
-            os.path.join(args.save_dir, "images", f"img_{save_iteration}.png"),
-            all_data,
-            unnormalize=False,
-            dataname=args.dataset,
-        )  # Save images
+        # os.makedirs(args.save_dir, exist_ok=True)
+        # save_img(
+        #     os.path.join(args.save_dir, "images", f"img_{save_iteration}.png"),
+        #     all_data,
+        #     unnormalize=False,
+        #     dataname=args.dataset,
+        # )  # Save images
         data_save_path = os.path.join(
             args.save_dir, "distilled_data", f"data_{save_iteration}.pt"
         )

@@ -22,7 +22,7 @@ network:
   norm_type: layernorm          # 使用 batch (或 instance)
   depth: 12                 
   layer_index: [3, 6, 9, 12]
-  length: 512
+  max_length: 512
   # width: 1.0                # 在resnet18中，不使用该参数
 
 # 训练配置 (用于 Pretrain 和 Evaluation)
@@ -34,8 +34,8 @@ train:
   batch_size: 128            # 预训练/评估时的训练批次大小 (会被 world_size 除)
   lr: 0.0001                  # 学习率
   adamw_lr: 0.0001            # 如果 eval_optimizer 是 adamw
-  eval_optimizer: adamw      # 评估时使用的优化器 (adam 或 sgd)
-  momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)
+  eval_optimizer: sgd      # 评估时使用的优化器 (adam 或 sgd)
+  momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)  
   weight_decay: 5e-4        # 权重衰减 (AdamW 需要)
   seed: 42                  # 随机种子
   model_num: 10             # 预训练模型的数量 (如果需要生成多个)
@@ -52,7 +52,7 @@ augmentation:
 
 # 优化配置 (用于 Condense)
 optimization:
-  optimizer: adamw           # 蒸馏优化器 (adam 或 sgd)
+  optimizer: sgd           # 蒸馏优化器 (adam 或 sgd)
   lr_scale_adam: 0.1        # Adam/AdamW 学习率缩放因子 (相对于 lr_img)
   lr_img: 0.01              # 蒸馏图像的学习率 (如果 optimizer=sgd)
   mom_img: 0.5              # 蒸馏图像的 momentum (如果 optimizer=sgd)

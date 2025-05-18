@@ -39,10 +39,10 @@ def check_args(args):
         if args.rank == 0:
             print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
     
-    if not hasattr(args, 'length'):
-        args.length = 512  # 默认文本最大长度
+    if not hasattr(args, 'max_length'):
+        args.max_length = 512  # 默认文本最大长度
         if args.rank == 0:
-            print(f"Warning: 'length' not found in args, using default: {args.length}")
+            print(f"Warning: 'max_length' not found in args, using default: {args.max_length}")
     
     if not hasattr(args, 'is_multilabel'):
         args.is_multilabel = True  # 默认为多标签分类
@@ -122,14 +122,20 @@ if __name__ == '__main__':
     parser.add_argument('--init',type=str,default='mix',choices=['random', 'noise', 'mix', 'load'],help='condensed data initialization type')
     parser.add_argument('--load_path',type=str,default=None,help="Path to load the synset")
     parser.add_argument('--gpu', type=str, default = "0",required=True, help='GPUs to use, e.g., "0,1,2,3"') 
-    parser.add_argument('-i', '--ipc', type=int, default=1,required=True, help='number of condensed data per class')
+    parser.add_argument('-i', '--ipc', type=int, default=10, help='number of condensed data per class')
     parser.add_argument('--tf32', action='store_true',default=True,help='Enable TF32')
     parser.add_argument('--sampling_net', action='store_true',default=False,help='Enable sampling_net')
     args = parser.parse_args()
     args_processor = ArgsProcessor(args.config_path)
     args = args_processor.add_args_from_yaml(args)
-    args.logger("args: {}".format(args))
     
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     init_script(args)
+    # 格式化args输出
+    args_str = "Experiment Configuration:\n"
+    for arg_name, arg_value in sorted(vars(args).items()):
+        if not arg_name.startswith('_'):  # 跳过私有属性
+            args_str += f"  {arg_name}: {arg_value}\n"
+    args.logger(args_str)
+
     main_worker(args)

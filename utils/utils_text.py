@@ -496,39 +496,9 @@ def get_loader(args):
 
 
 def get_feature_extractor(args):
-    model_init = define_model(
-        args.dataset,
-        args.norm_type,
-        args.net_type,
-        args.nch,
-        args.depth,
-        args.width,
-        args.nclass,
-        args.logger,
-        args.size,
-    ).to(args.device)
-    model_final = define_model(
-        args.dataset,
-        args.norm_type,
-        args.net_type,
-        args.nch,
-        args.depth,
-        args.width,
-        args.nclass,
-        args.logger,
-        args.size,
-    ).to(args.device)
-    model_interval = define_model(
-        args.dataset,
-        args.norm_type,
-        args.net_type,
-        args.nch,
-        args.depth,
-        args.width,
-        args.nclass,
-        args.logger,
-        args.size,
-    ).to(args.device)
+    model_init = define_language_model(args.model_path, args.net_type, args.nclass).to(args.device)
+    model_final = define_language_model(args.model_path, args.net_type, args.nclass).to(args.device)
+    model_interval = define_language_model(args.model_path, args.net_type, args.nclass).to(args.device)
     return model_init, model_interval, model_final
 
 
@@ -707,12 +677,7 @@ def get_reuters_loader(args):
         # 使用MultiLabelClassMemDataLoader进行类别采样
         loader_real = MultiLabelClassMemDataLoader(
             train_dataset,
-            batch_size=args.batch_real,
-            num_workers=args.workers,
-            shuffle=True,
-            pin_memory=True,
-            drop_last=True,
-            collate_fn=collate_fn
+            batch_size=args.batch_real
         )
         return loader_real, None
         

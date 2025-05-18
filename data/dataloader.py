@@ -260,28 +260,49 @@ class AsyncLoader:
                 # Current class
                 current_class = self.class_list[self.current_index]
                 # Load data
-                img, img_label = self.loader_real.class_sample(
+                data_dict, img_label = self.loader_real.class_sample(
                     current_class, self.batch_size
                 )
-                img, img_label = img.to(self.device), img_label.to(
-                    self.device
-                )  # Move data to the device
+                
+                # 确保数据在正确的设备上
+                if isinstance(data_dict, dict):
+                    # 如果是字典格式（如MultiLabelClassMemDataLoader返回的格式）
+                    data_dict = {k: v.to(self.device) if torch.is_tensor(v) else v 
+                               for k, v in data_dict.items()}
+                else:
+                    # 如果是张量格式（如其他DataLoader返回的格式）
+                    data_dict = data_dict.to(self.device)
+                
+                img_label = img_label.to(self.device)
+                
                 # Put data into the queue
-                self.queue.put((img_label, img))
+                self.queue.put((img_label, data_dict))
                 # Update class index
                 self.current_index = (self.current_index + 1) % self.nclass
             else:
                 time.sleep(0.01)  # Wait briefly if the buffer is full
 
     def class_sample(self, c):
-        """Get data of the specified class"""
+        """Get data of the specified class
+        
+        Args:
+            c: 目标类别索引
+            
+        Returns:
+            data_dict: 数据字典
+            img_label: 标签张量
+        """
         while True:
-            img_label, img = self.queue.get()
-            if img_label[0] == c:  # If the label matches the desired class
-                return img, img_label
+            img_label, data_dict = self.queue.get()
+            print('--------------------------------')
+            print(f"img_label: {img_label.shape}")
+            print('--------------------------------')
+            # 检查标签向量中第c个位置是否为1（表示属于该类）
+            if img_label[0, c] > 0:  # 使用多热向量的索引检查
+                return data_dict, img_label
             else:
-                # If not the target class, put the data back into the queue
-                self.queue.put((img_label, img))
+                # 如果不是目标类别，将数据放回队列
+                self.queue.put((img_label, data_dict))
 
     def stop(self):
         """Stop the asynchronous data loading thread"""
@@ -490,104 +511,81 @@ class MultiLabelClassMemDataLoader:
     def __init__(self, dataset, batch_size, drop_last=False, device="cuda"):
         self.device = device
         self.batch_size = batch_size
-        self.dataset = dataset # Keep reference if needed, but data is preloaded
+        self.dataset = dataset
 
         print(f"Preloading data to device: {self.device}...")
-        # Preload data
-        self.data = torch.stack([d[0] for d in tqdm(dataset, desc="Loading data")]).to(device)
+        # 修改数据加载方式，适应HuggingFace数据集格式
+        self.data = {
+            'input_ids': torch.stack([d['input_ids'] for d in tqdm(dataset, desc="Loading input_ids")]).to(device),
+            'attention_mask': torch.stack([d['attention_mask'] for d in tqdm(dataset, desc="Loading attention_mask")]).to(device)
+        }
+        if 'token_type_ids' in dataset[0]:
+            self.data['token_type_ids'] = torch.stack([d['token_type_ids'] for d in tqdm(dataset, desc="Loading token_type_ids")]).to(device)
 
-        # Preload multi-hot targets
-        # Try accessing dataset.targets first for efficiency
-        targets_source = getattr(dataset, 'targets', None)
-        if targets_source is not None and len(targets_source) == len(dataset):
-             print("Using precomputed dataset.targets for preloading.")
-             # Assuming targets_source is already a tensor or list of tensors/arrays
-             if isinstance(targets_source, torch.Tensor):
-                 self.targets = targets_source.to(device)
-             elif isinstance(targets_source, (list, tuple)):
-                 # Try stacking; requires targets to be consistent (tensors/arrays)
-                 try:
-                     # Convert numpy arrays to tensors if necessary
-                     targets_list = [torch.from_numpy(t) if isinstance(t, np.ndarray) else t for t in targets_source]
-                     self.targets = torch.stack(targets_list).to(device)
-                 except Exception as e:
-                     raise TypeError(f"Failed to stack targets from dataset.targets. Ensure they are uniform tensors or numpy arrays. Error: {e}")
-             else: # Try converting numpy array
-                 try:
-                     self.targets = torch.from_numpy(targets_source).to(device)
-                 except Exception as e:
-                     raise TypeError(f"dataset.targets has unsupported type {type(targets_source)}. Expected Tensor, list/tuple, or numpy array. Error: {e}")
-        else:
-             print("Iterating through dataset to get targets for preloading.")
-             # Assuming dataset[i] returns (data, target_vector)
-             targets_list = [d[1] for d in tqdm(dataset, desc="Loading targets")]
-             # Convert numpy arrays to tensors if necessary
-             targets_list = [torch.from_numpy(t) if isinstance(t, np.ndarray) else t for t in targets_list]
-             try:
-                 self.targets = torch.stack(targets_list).to(device)
-             except Exception as e:
-                 raise TypeError(f"Failed to stack targets obtained by iterating dataset. Ensure target vectors are uniform tensors or numpy arrays. Error: {e}")
-
+        # 加载标签
+        self.targets = torch.stack([d['labels'] for d in tqdm(dataset, desc="Loading labels")]).to(device)
+        # if dist.get_rank() == 0:
+        print('--------------------------------')
+        print(f"MultiLabelClassMemDataLoader targets: {self.targets.shape}")
+        print('--------------------------------')
         print("Data preloading complete.")
 
-        # Standard sampler for iterating through the whole dataset
+        # 其余代码保持不变
         sampler = torch.utils.data.SubsetRandomSampler(range(len(dataset)))
         self.batch_sampler = torch.utils.data.BatchSampler(
             sampler, batch_size=batch_size, drop_last=drop_last
         )
         self.iterator = iter(_RepeatSampler(self.batch_sampler))
 
-        # Determine nclass from preloaded targets tensor shape
         self.nclass = self.targets.shape[1]
         print(f"nclass determined from preloaded targets shape: {self.nclass}")
 
-        # Build class indices based on preloaded multi-hot targets
+        # 构建类别索引
         self.cls_idx = [[] for _ in range(self.nclass)]
         print("Building class indices from preloaded multi-hot targets...")
-        # Iterate through the preloaded targets tensor
         for i in tqdm(range(self.targets.shape[0]), desc="Indexing samples"):
             target_vector = self.targets[i]
             for c in range(self.nclass):
-                if target_vector[c] > 0: # Check for presence
+                if target_vector[c] > 0:
                     self.cls_idx[c].append(i)
 
         for c in range(self.nclass):
+            # print(f"Class {c} has {len(self.cls_idx[c])} samples.")
             if not self.cls_idx[c]:
                 print(f"Warning: Class {c} has no samples in the dataset.")
-
-        # Initialize ClassBatchSampler for class-specific sampling
+        # print('--------------------------------')
         effective_batch_size = self.batch_size
         self.class_sampler = ClassBatchSampler(
             self.cls_idx, effective_batch_size, drop_last=True
         )
 
-        # Target tensor representing the *sampled* class
-        self.cls_targets = torch.tensor(
-            [np.ones(effective_batch_size) * c for c in range(self.nclass)],
-            dtype=torch.long,
-            requires_grad=False,
-            device=self.device, # Use the specified device
-        )
+        # self.cls_targets = torch.tensor(
+        #     [np.ones(effective_batch_size) * c for c in range(self.nclass)],
+        #     dtype=torch.long,
+        #     requires_grad=False,
+        #     device=self.device,
+        # )
 
-        # Check for data type conversion need (applied after sampling)
         self.convert = None
-        if self.data.dtype == torch.uint8:
-            print("Data type is torch.uint8, setting up conversion to float.")
-            self.convert = transforms.ConvertImageDtype(torch.float)
-
-        print("MultiLabelClassMemDataLoader initialized.")
 
 
     def class_sample(self, c, ipc=-1):
-        """Samples data points belonging to class c from preloaded data."""
+        """Samples data points belonging to class c from preloaded data.
+        
+        Args:
+            c: 目标类别索引
+            ipc: 每个类别的样本数，-1表示使用batch_size
+            
+        Returns:
+            data: 数据字典，包含input_ids等
+            target: 多热标签向量
+        """
         if c >= self.nclass or not self.cls_idx[c]:
              raise ValueError(f"Class {c} is invalid or has no samples.")
 
         if ipc > 0:
             num_samples_in_class = len(self.cls_idx[c])
-            indices = random.sample(self.cls_idx[c], min(ipc, num_samples_in_class)) # 改成随机采样
-            # if len(indices) < ipc:
-            #      print(f"Warning: Requested {ipc} samples for class {c}, but only {len(indices)} available.")
+            indices = random.sample(self.cls_idx[c], min(ipc, num_samples_in_class))
             if not indices:
                  raise ValueError(f"Cannot sample {ipc} samples for class {c}, as it has no samples.")
         else:
@@ -596,23 +594,29 @@ class MultiLabelClassMemDataLoader:
             except StopIteration:
                  raise RuntimeError(f"Sampler for class {c} unexpectedly exhausted.")
 
-        # Fetch preloaded data for the sampled indices
-        data = self.data[indices] # Efficient slicing on device tensor
-        # Target represents the sampled class 'c'
-        target = self.cls_targets[c][:len(indices)] # Adjust size if needed
+        # 获取数据字典
+        data = {
+            'input_ids': self.data['input_ids'][indices],
+            'attention_mask': self.data['attention_mask'][indices]
+        }
+        if 'token_type_ids' in self.data:
+            data['token_type_ids'] = self.data['token_type_ids'][indices]
+        
+        # 获取完整的多热标签向量
+        target = self.targets[indices]
 
-        # Apply conversion if needed (data is already on the target device)
+        # Apply conversion if needed
         if self.convert is not None:
-            data = self.convert(data)
+            data = {k: self.convert(v) if torch.is_tensor(v) else v for k, v in data.items()}
 
-        return data, target # Data and target are already on self.device
+        return data, target
 
     def sample(self):
         """Samples a standard batch from preloaded data."""
         indices = next(self.iterator) # Get indices from the standard batch sampler
 
         # Fetch preloaded data and corresponding multi-hot targets
-        data = self.data[indices]
+        data = self.data['input_ids'][indices]
         target = self.targets[indices] # Fetch the multi-hot vectors
 
         # Apply conversion if needed

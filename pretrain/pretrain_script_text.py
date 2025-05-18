@@ -39,10 +39,10 @@ def check_args(args):
         if args.rank == 0:
             print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
     
-    if not hasattr(args, 'length'):
-        args.length = 512  # 默认文本最大长度
+    if not hasattr(args, 'max_length'):
+        args.max_length = 512  # 默认文本最大长度
         if args.rank == 0:
-            print(f"Warning: 'length' not found in args, using default: {args.length}")
+            print(f"Warning: 'max_length' not found in args, using default: {args.max_length}")
     
     if not hasattr(args, 'is_multilabel'):
         args.is_multilabel = True  # 默认为多标签分类

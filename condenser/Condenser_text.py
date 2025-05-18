@@ -31,38 +31,45 @@ class Condenser:
         self.ipc = args.ipc  # 每个类别的样本数
         self.nclass_list = nclass_list
         self.device = device
-        self.nclass = len(nclass_list)
-        
-        # 初始化 BERT tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+        self.nclass = len(nclass_list)  # 当前进程处理的类别数（15）
+        self.total_nclass = args.nclass  # 总类别数（90）
         
         # 初始化合成数据
-        # 对于文本数据，我们需要存储 tokenized 后的 input_ids, attention_mask 等
-        self.data = {
-            'input_ids': torch.randint(
-                low=0, 
-                high=self.tokenizer.vocab_size,
-                size=(self.nclass * self.ipc, args.max_length),
-                dtype=torch.long,
-                requires_grad=False,
-                device=self.device
-            ),
-            'attention_mask': torch.ones(
-                (self.nclass * self.ipc, args.max_length),
-                dtype=torch.long,
-                requires_grad=False,
-                device=self.device
-            )
-        }
+        # 使用正态分布初始化embedding，范围与BERT的embedding层初始化范围一致
+        self.data = torch.randn(
+            (self.nclass * self.ipc, args.max_length, 768),  # 768是BERT的隐藏层维度
+            dtype=torch.float32,
+            requires_grad=True,
+            device=self.device
+        )
         
-        # 对于多标签分类，标签是 multi-hot 向量
+        # attention_mask作为类属性单独存储
+        self.attention_mask = torch.ones(
+            (self.nclass * self.ipc, args.max_length),
+            dtype=torch.long,
+            requires_grad=False,
+            device=self.device
+        )
+        
+        # 修改标签维度为总类别数（90）
         self.targets = torch.zeros(
-            (self.nclass * self.ipc, self.nclass),
+            (self.nclass * self.ipc, self.total_nclass),
             dtype=torch.float,
             requires_grad=False,
             device=self.device
         )
         
+        if dist.get_rank() == 0:
+            print('--------------------------------')
+            print(f"dist.get_world_size(): {dist.get_world_size()}")
+            print(f"self.nclass (local): {self.nclass}")
+            print(f"self.total_nclass: {self.total_nclass}")
+            print(f"self.nclass_list: {self.nclass_list}")
+            print(f"self.ipc: {self.ipc}")
+            print(f"self.targets.shape: {self.targets.shape}")
+            print(f"self.data.shape: {self.data.shape}")
+            print('--------------------------------')
+            
         # 为每个类别设置标签
         for i, c in enumerate(self.nclass_list):
             start_idx = i * self.ipc
@@ -71,16 +78,12 @@ class Condenser:
             
         # 记录每个类别的样本索引
         self.cls_idx = [[] for _ in range(self.nclass)]
-        for i in range(self.data['input_ids'].shape[0]):
+        for i in range(self.data.shape[0]):
             # 对于多标签情况，找到第一个为1的标签作为主类别
             main_class = torch.where(self.targets[i] == 1)[0][0].item()
-            self.cls_idx[main_class].append(i)
-            
-        self.factor = max(1, args.factor)
-        self.decode_type = args.decode_type
-        self.resize = nn.Upsample(size=self.size, mode="bilinear")
-        if dist.get_rank() == 0:
-            self.logger(f"Factor: {self.factor} ({self.decode_type})")
+            # 将主类别映射到本地类别索引
+            local_class_idx = self.nclass_list.index(main_class)
+            self.cls_idx[local_class_idx].append(i)
 
     def load_condensed_data(self, loader, init_type="noise", load_path=None):
         if init_type == "random":
@@ -93,16 +96,9 @@ class Condenser:
                 start_idx = self.ipc * self.nclass_list.index(c)
                 end_idx = self.ipc * (self.nclass_list.index(c) + 1)
                 
-                # 确保数据格式正确
-                if isinstance(data, dict):  # 如果数据是字典格式（包含input_ids和attention_mask）
-                    self.data['input_ids'][start_idx:end_idx] = data['input_ids']
-                    self.data['attention_mask'][start_idx:end_idx] = data['attention_mask']
-                else:  # 如果数据是张量格式
-                    self.data['input_ids'][start_idx:end_idx] = data
-                    # 如果没有attention_mask，则全部设为1
-                    self.data['attention_mask'][start_idx:end_idx] = torch.ones_like(data)
-                
-                # 更新标签
+                # 更新数据
+                self.data[start_idx:end_idx] = data['embeddings']
+                self.attention_mask[start_idx:end_idx] = data['attention_mask']
                 self.targets[start_idx:end_idx] = target
                 
         elif init_type == "noise":
@@ -116,28 +112,29 @@ class Condenser:
             if dist.get_rank() == 0:
                 self.logger("==================designed path initialize condense dataset ===================")
             data_dict = torch.load(load_path)
-            self.data = {k: v.to(self.device) for k, v in data_dict['data'].items()}
+            self.data = data_dict['data'].to(self.device)
+            self.attention_mask = data_dict['attention_mask'].to(self.device)
             self.targets = data_dict['targets'].to(self.device)
 
     def parameters(self):
-        parameter_list = [self.data]
-        return parameter_list
+        """返回需要优化的参数"""
+        return [self.data]
 
     def class_sample(self, c, max_size=10000):
         """按类别采样数据"""
         # 对于多标签情况，检查targets中第c个位置是否为1
         target_mask = self.targets[:, c] == 1
         data = {
-            'input_ids': self.data['input_ids'][target_mask],
-            'attention_mask': self.data['attention_mask'][target_mask]
+            'embeddings': self.data[target_mask],
+            'attention_mask': self.attention_mask[target_mask]
         }
         target = self.targets[target_mask]
         
         # 如果样本数量超过max_size，则随机选择max_size个样本
-        if len(data['input_ids']) > max_size:
-            indices = torch.randperm(len(data['input_ids']))[:max_size]
+        if len(data['embeddings']) > max_size:
+            indices = torch.randperm(len(data['embeddings']))[:max_size]
             data = {
-                'input_ids': data['input_ids'][indices],
+                'embeddings': data['embeddings'][indices],
                 'attention_mask': data['attention_mask'][indices]
             }
             target = target[indices]
@@ -156,8 +153,8 @@ class Condenser:
             # 对于多标签情况，检查targets中第c个位置是否为1
             target_mask = self.targets[:, c] == 1
             data = {
-                'input_ids': self.data['input_ids'][target_mask].detach(),
-                'attention_mask': self.data['attention_mask'][target_mask].detach()
+                'embeddings': self.data[target_mask].detach(),
+                'attention_mask': self.attention_mask[target_mask].detach()
             }
             target = self.targets[target_mask].detach()
             
@@ -166,13 +163,13 @@ class Condenser:
 
         # 合并所有类别的数据
         combined_data = {
-            'input_ids': torch.cat([d['input_ids'] for d in data_dec]),
+            'embeddings': torch.cat([d['embeddings'] for d in data_dec]),
             'attention_mask': torch.cat([d['attention_mask'] for d in data_dec])
         }
         combined_targets = torch.cat(target_dec)
         
         if args.rank == 0:
-            print("Decode condensed data: ", combined_data['input_ids'].shape)
+            print("Decode condensed data: ", combined_data['embeddings'].shape)
         
         # 创建数据集
         train_dataset = TensorDataset(combined_data, combined_targets, train_transform)
@@ -244,13 +241,13 @@ class Condenser:
             )
             
             # 确保数据在有效范围内
-            self.data['input_ids'] = torch.clamp(
-                self.data['input_ids'], 
-                min=0, 
-                max=self.tokenizer.vocab_size-1
+            self.data = torch.clamp(
+                self.data, 
+                min=-1, 
+                max=1
             )
-            self.data['attention_mask'] = torch.clamp(
-                self.data['attention_mask'], 
+            self.attention_mask = torch.clamp(
+                self.attention_mask, 
                 min=0, 
                 max=1
             )
@@ -266,7 +263,7 @@ class Condenser:
                 class_list=self.args.class_list,
                 timing_tracker=self.timing_tracker,
                 model_interval=model_interval,
-                data_grad=self.data['input_ids'].grad,
+                data_grad=self.data.grad,
                 optim_sampling_net=optim_sampling_net,
                 sampling_net=sampling_net
             )
@@ -283,7 +280,7 @@ class Condenser:
                     timing_tracker=self.timing_tracker,
                     model_final=model_final,
                     calib_weight=args.calib_weight,
-                    data_grad=self.data['input_ids'].grad,
+                    data_grad=self.data.grad,
                 )
             else:
                 calib_loss_total, calib_grad_mean = 0, 0
