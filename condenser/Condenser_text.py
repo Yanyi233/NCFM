@@ -12,16 +12,11 @@ from data.dataset import TensorDataset
 from utils.utils_text import define_model
 from .evaluate import evaluate_syn_data
 from torch.utils.data import DistributedSampler, DataLoader
-from .decode import decode
-from .subsample import subsample
-from .condense_transfom import get_train_transform
-from .compute_loss import compute_match_loss, compute_calib_loss
+from .compute_loss_text import compute_match_loss, compute_calib_loss
 from data.dataloader import MultiEpochsDataLoader
-import torch.optim as optim
 from data.dataloader import AsyncLoader
 from tqdm import tqdm
 import random
-from transformers import AutoTokenizer
 
 class Condenser:
     def __init__(self, args, nclass_list, device="cuda"):
@@ -124,19 +119,13 @@ class Condenser:
         """按类别采样数据"""
         # 对于多标签情况，检查targets中第c个位置是否为1
         target_mask = self.targets[:, c] == 1
-        data = {
-            'embeddings': self.data[target_mask],
-            'attention_mask': self.attention_mask[target_mask]
-        }
+        data = self.data[target_mask]
         target = self.targets[target_mask]
         
         # 如果样本数量超过max_size，则随机选择max_size个样本
-        if len(data['embeddings']) > max_size:
-            indices = torch.randperm(len(data['embeddings']))[:max_size]
-            data = {
-                'embeddings': data['embeddings'][indices],
-                'attention_mask': data['attention_mask'][indices]
-            }
+        if len(data) > max_size:
+            indices = torch.randperm(len(data))[:max_size]
+            data = data[indices]
             target = target[indices]
         
         return data, target
@@ -152,24 +141,19 @@ class Condenser:
         for c in self.nclass_list:
             # 对于多标签情况，检查targets中第c个位置是否为1
             target_mask = self.targets[:, c] == 1
-            data = {
-                'embeddings': self.data[target_mask].detach(),
-                'attention_mask': self.attention_mask[target_mask].detach()
-            }
+            data = self.data[target_mask].detach()
+            attention_mask = self.attention_mask[target_mask].detach()
             target = self.targets[target_mask].detach()
             
             data_dec.append(data)
             target_dec.append(target)
 
         # 合并所有类别的数据
-        combined_data = {
-            'embeddings': torch.cat([d['embeddings'] for d in data_dec]),
-            'attention_mask': torch.cat([d['attention_mask'] for d in data_dec])
-        }
+        combined_data = torch.cat(data_dec)
         combined_targets = torch.cat(target_dec)
         
         if args.rank == 0:
-            print("Decode condensed data: ", combined_data['embeddings'].shape)
+            print("Decode condensed data: ", combined_data.shape)
         
         # 创建数据集
         train_dataset = TensorDataset(combined_data, combined_targets, train_transform)
