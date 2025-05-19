@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torch.distributed as dist
 from utils.utils_text import update_feature_extractor
 from utils.ddp import gather_save_visualize, sync_distributed_metric
-from NCFM.NCFM import match_loss, cailb_loss, mutil_layer_match_loss, CFLossFunc
+from NCFM.NCFM_text import match_loss, cailb_loss, mutil_layer_match_loss, CFLossFunc
 from NCFM.SampleNet import SampleNet
 from utils.experiment_tracker import TimingTracker, get_time
 from data.dataset import TensorDataset
@@ -54,16 +54,16 @@ class Condenser:
             device=self.device
         )
         
-        if dist.get_rank() == 0:
-            print('--------------------------------')
-            print(f"dist.get_world_size(): {dist.get_world_size()}")
-            print(f"self.nclass (local): {self.nclass}")
-            print(f"self.total_nclass: {self.total_nclass}")
-            print(f"self.nclass_list: {self.nclass_list}")
-            print(f"self.ipc: {self.ipc}")
-            print(f"self.targets.shape: {self.targets.shape}")
-            print(f"self.data.shape: {self.data.shape}")
-            print('--------------------------------')
+        # if dist.get_rank() == 0:
+        #     print('--------------------------------')
+        #     print(f"dist.get_world_size(): {dist.get_world_size()}")
+        #     print(f"self.nclass (local): {self.nclass}")
+        #     print(f"self.total_nclass: {self.total_nclass}")
+        #     print(f"self.nclass_list: {self.nclass_list}")
+        #     print(f"self.ipc: {self.ipc}")
+        #     print(f"self.targets.shape: {self.targets.shape}")
+        #     print(f"self.data.shape: {self.data.shape}")
+        #     print('--------------------------------')
             
         # 为每个类别设置标签
         for i, c in enumerate(self.nclass_list):
@@ -181,7 +181,7 @@ class Condenser:
         plotter,
         loader_real,
         aug,
-        optim_img,
+        optim,
         model_init,
         model_interval,
         model_final,
@@ -203,13 +203,13 @@ class Condenser:
         # 设置学习率调度器
         if args.sampling_net:
             scheduler_sampling_net = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optim_img, mode="min", factor=0.5, patience=500, verbose=False
+                optim, mode="min", factor=0.5, patience=500, verbose=False
             )
         else:
             scheduler_sampling_net = None
         
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optim_img, mode="min", factor=0.5, patience=500, verbose=False
+            optim, mode="min", factor=0.5, patience=500, verbose=False
         )
         
         # 保存初始状态
@@ -224,17 +224,17 @@ class Condenser:
                 args, model_init, model_final, model_interval, a=0, b=1
             )
             
-            # 确保数据在有效范围内
-            self.data = torch.clamp(
-                self.data, 
-                min=-1, 
-                max=1
-            )
-            self.attention_mask = torch.clamp(
-                self.attention_mask, 
-                min=0, 
-                max=1
-            )
+            # # 确保数据在有效范围内
+            # self.data = torch.clamp(
+            #     self.data, 
+            #     min=-1, 
+            #     max=1
+            # )
+            # self.attention_mask = torch.clamp(
+            #     self.attention_mask, 
+            #     min=0, 
+            #     max=1
+            # )
             
             # 计算匹配损失
             match_loss_total, match_grad_mean = compute_match_loss(
@@ -243,7 +243,7 @@ class Condenser:
                 sample_fn=loader_syn.class_sample,
                 aug_fn=aug,
                 inner_loss_fn=match_loss if args.depth <= 5 else mutil_layer_match_loss,
-                optim_img=optim_img,
+                optim=optim,
                 class_list=self.args.class_list,
                 timing_tracker=self.timing_tracker,
                 model_interval=model_interval,
@@ -258,7 +258,7 @@ class Condenser:
                     sample_fn=loader_syn.class_sample,
                     aug_fn=aug,
                     inter_loss_fn=cailb_loss,
-                    optim_img=optim_img,
+                    optim=optim,
                     iter_calib=args.iter_calib,
                     class_list=self.args.class_list,
                     timing_tracker=self.timing_tracker,

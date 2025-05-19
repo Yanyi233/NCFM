@@ -9,11 +9,33 @@ class BERTWithFeatures(nn.Module):
         hidden_size = self.bert.config.hidden_size
         self.classifier = nn.Linear(hidden_size, num_classes)
 
-    def forward(self, input_ids, attention_mask=None, token_type_ids=None, return_features=False):
-        # BERT输出
-        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, output_hidden_states=True)
-        pooled_output = outputs.pooler_output  # [batch, hidden]
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, embedding=None, return_features=False):
+        if embedding is not None:
+            # 处理合成样本 (embedding 形状: [batch_size, seq_len, hidden_size])
+            if input_ids is not None:
+                raise ValueError("Cannot provide both 'input_ids' and 'embedding'.")
+            
+            # 自动为合成样本生成 attention_mask (如果未提供)
+            if attention_mask is None:
+                batch_size, seq_len, _ = embedding.shape
+                attention_mask = torch.ones(batch_size, seq_len, device=embedding.device, dtype=torch.long)
+            
+            outputs = self.bert(inputs_embeds=embedding, 
+                                attention_mask=attention_mask, 
+                                token_type_ids=token_type_ids,
+                                output_hidden_states=True)
+        elif input_ids is not None:
+            # 处理真实样本
+            outputs = self.bert(input_ids=input_ids, 
+                                attention_mask=attention_mask, 
+                                token_type_ids=token_type_ids, 
+                                output_hidden_states=True)
+        else:
+            raise ValueError("Either 'input_ids' or 'embedding' must be provided.")
+        
+        pooled_output = outputs.pooler_output
         logits = self.classifier(pooled_output)
+
         if return_features:
             return logits, pooled_output
         else:

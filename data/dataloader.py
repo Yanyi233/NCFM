@@ -294,9 +294,6 @@ class AsyncLoader:
         """
         while True:
             img_label, data_dict = self.queue.get()
-            print('--------------------------------')
-            print(f"img_label: {img_label.shape}")
-            print('--------------------------------')
             # 检查标签向量中第c个位置是否为1（表示属于该类）
             if img_label[0, c] > 0:  # 使用多热向量的索引检查
                 return data_dict, img_label
@@ -525,10 +522,10 @@ class MultiLabelClassMemDataLoader:
         # 加载标签
         self.targets = torch.stack([d['labels'] for d in tqdm(dataset, desc="Loading labels")]).to(device)
         # if dist.get_rank() == 0:
-        print('--------------------------------')
-        print(f"MultiLabelClassMemDataLoader targets: {self.targets.shape}")
-        print('--------------------------------')
-        print("Data preloading complete.")
+        # print('--------------------------------')
+        # print(f"MultiLabelClassMemDataLoader targets: {self.targets.shape}")
+        # print('--------------------------------')
+        # print("Data preloading complete.")
 
         # 其余代码保持不变
         sampler = torch.utils.data.SubsetRandomSampler(range(len(dataset)))

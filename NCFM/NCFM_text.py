@@ -144,7 +144,7 @@ def mutil_layer_match_loss(batch_real, batch_syn, model, args=None):
     return loss
 
 
-def cailb_loss(img_syn, label_syn, trained_model):
-    logits = trained_model(img_syn, return_features=False)
+def cailb_loss(batch_syn, label_syn, trained_model):
+    logits = trained_model(embedding=batch_syn, return_features=False)
     loss = F.cross_entropy(logits, label_syn)
     return loss

@@ -129,6 +129,7 @@ if __name__ == '__main__':
     args_processor = ArgsProcessor(args.config_path)
     args = args_processor.add_args_from_yaml(args)
     
+    torch.autograd.set_detect_anomaly(True)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
     init_script(args)
     # 格式化args输出

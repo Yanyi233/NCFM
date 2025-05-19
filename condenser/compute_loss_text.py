@@ -7,7 +7,7 @@ def compute_match_loss(
     sample_fn,
     aug_fn,
     inner_loss_fn,
-    optim_img,
+    optim,
     class_list,
     timing_tracker,
     model_interval,
@@ -33,18 +33,18 @@ def compute_match_loss(
         loss_total += loss.item()
         timing_tracker.record("loss")
 
-        optim_img.zero_grad()
+        optim.zero_grad()
         if optim_sampling_net is not None:
             optim_sampling_net.zero_grad()
             loss.backward(retain_graph=True)
-            optim_img.step()
-            optim_img.zero_grad()
+            optim.step()
+            optim.zero_grad()
             (-loss).backward()
             optim_sampling_net.step()
             optim_sampling_net.zero_grad()
         else:
             loss.backward()
-            optim_img.step()
+            optim.step()
         if data_grad is not None:
             match_grad_mean += torch.norm(data_grad).item()
         timing_tracker.record("backward")
@@ -56,7 +56,7 @@ def compute_calib_loss(
     sample_fn,
     aug_fn,
     inter_loss_fn,
-    optim_img,
+    optim,
     iter_calib,
     class_list,
     timing_tracker,
@@ -71,21 +71,21 @@ def compute_calib_loss(
         for c in class_list:
             timing_tracker.start_step()
 
-            img_syn, label_syn = sample_fn(c)
+            batch_syn, label_syn = sample_fn(c)
             timing_tracker.record("data")
 
-            img_aug = aug_fn(torch.cat([img_syn]))
-            timing_tracker.record("aug")
+            # img_aug = aug_fn(torch.cat([img_syn]))
+            # timing_tracker.record("aug")
 
-            loss = calib_weight * inter_loss_fn(img_aug, label_syn, model_final)
+            loss = calib_weight * inter_loss_fn(batch_syn, label_syn, model_final)
             calib_loss_total += loss.item()
             timing_tracker.record("loss")
 
-            optim_img.zero_grad()
+            optim.zero_grad()
             loss.backward()
             if data_grad is not None:
                 calib_grad_norm = torch.norm(data_grad).item()
-            optim_img.step()
+            optim.step()
             timing_tracker.record("backward")
 
     return calib_loss_total, calib_grad_norm
