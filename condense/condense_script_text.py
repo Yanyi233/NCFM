@@ -137,6 +137,7 @@ if __name__ == '__main__':
     for arg_name, arg_value in sorted(vars(args).items()):
         if not arg_name.startswith('_'):  # 跳过私有属性
             args_str += f"  {arg_name}: {arg_value}\n"
-    args.logger(args_str)
+    if args.rank == 0:
+        args.logger(args_str)
 
     main_worker(args)

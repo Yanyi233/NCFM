@@ -20,18 +20,38 @@ def init_script(args):
     rank, world_size, local_rank, local_world_size, device = (
         initialize_distribution_training(args.backend, args.init_method)
     )
+    args.rank, args.world_size, args.local_rank, args.local_world_size, args.device = (
+        rank,
+        world_size,
+        local_rank,
+        local_world_size,
+        device,
+    )
+
+    # 由 Rank 0 生成时间戳
+    if args.rank == 0:
+        timestamp_obj = torch.tensor(list(map(ord, datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))), dtype=torch.int8, device=args.device)
+    else:
+        # 其他 rank 创建一个同样大小的 placeholder tensor
+        timestamp_obj = torch.empty(15, dtype=torch.int8, device=args.device) # "%Y%m%d-%H%M%S" 是 15 个字符
+
+    # 广播时间戳
+    dist.broadcast(timestamp_obj, src=0)
+    
+    # 将 tensor 转回字符串
+    timestamp_str = "".join([chr(x) for x in timestamp_obj.cpu().tolist()])
+    args.timestamp_str = timestamp_str # 将时间戳字符串存储到 args 中，供后续函数使用
 
     args.it_save, args.it_log = set_iteration_parameters(args.niter, args.debug)
 
-    # 由于加入了timestamp，所以需要重新设置pretrain_dir，暂时考虑只用绝对路径
     # args.pretrain_dir = set_Pretrain_Directory(
-    #     args.pretrain_dir, args.dataset, args.depth, args.ipc, args.net_type
+    #     args.pretrain_dir, args.dataset, args.depth, args.ipc, args.net_type, args.timestamp_str
     # )
 
     args.exp_name, args.save_dir, args.lr_img = set_experiment_name_and_save_Dir(
         args.run_mode,
         args.dataset,
-        args.pretrain_dir,
+        args.pretrain_dir, # 如果 set_Pretrain_Directory 被调用，它会使用 args.timestamp_str
         args.save_dir,
         args.lr_img,
         args.lr_scale_adam,
@@ -41,6 +61,7 @@ def init_script(args):
         args.factor,
         args.lr,
         args.num_freqs,
+        args.timestamp_str # 传递时间戳字符串
     )
 
     set_random_seeds(args.seed)
@@ -50,15 +71,9 @@ def init_script(args):
     )
 
     args.logger = setup_logging_and_directories(args, args.run_mode, args.save_dir)
-    args.rank, args.world_size, args.local_rank, args.local_world_size, args.device = (
-        rank,
-        world_size,
-        local_rank,
-        local_world_size,
-        device,
-    )
+    
     if args.rank == 0:
-        args.logger("TF32 is enabled") if args.tf32 else print("TF32 is disabled")
+        args.logger("TF32 is enabled") if args.tf32 else args.logger("TF32 is disabled") # logger 在 rank 0 才打印
         args.logger(
             f"=> creating model {args.net_type}-{args.depth}, norm: {args.norm_type}"
         )
@@ -71,13 +86,12 @@ def set_iteration_parameters(niter, debug):
     return it_save, it_log
 
 
-def set_Pretrain_Directory(pretrain_dir, dataset, depth, ipc, net_type):
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-    
+def set_Pretrain_Directory(pretrain_dir, dataset, depth, ipc, net_type, timestamp_str): # 接收 timestamp_str
+    # timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M") # 不再在这里生成
     if dataset.lower() == "imagenet":
-        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/ResNet-{depth}_{timestamp}"
+        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/ResNet-{depth}_{timestamp_str}"
     else:
-        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/{net_type}_{timestamp}"
+        pretrain_dir = f"./{pretrain_dir}/{dataset}/ipc{ipc}/{net_type}_{timestamp_str}"
     return pretrain_dir
 
 
@@ -94,8 +108,9 @@ def set_experiment_name_and_save_Dir(
     factor,
     lr,
     num_freqs,
+    timestamp_str # 接收 timestamp_str
 ):
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
+    # timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M") # 不再在这里生成
     # Set the base save directory path according to the run_mode
     if run_mode == "Condense":
         assert ipc > 0, "IPC must be greater than 0"
@@ -105,7 +120,7 @@ def set_experiment_name_and_save_Dir(
             lr_img = lr_img * lr_scale_adam
 
         # Generate experiment name
-        exp_name = f"./condense/{dataset}/ipc{ipc}/{optimizer}_lr_img_{lr_img:.4f}_numr_reqs{num_freqs}_factor{factor}_{timestamp}"
+        exp_name = f"./condense/{dataset}/ipc{ipc}/{optimizer}_lr_img_{lr_img:.4f}_numr_reqs{num_freqs}_factor{factor}_{timestamp_str}"
         if load_path:
             exp_name += f"Reload_SynData_Path_{load_path}"
         save_dir = os.path.join(save_dir, exp_name)
@@ -113,11 +128,11 @@ def set_experiment_name_and_save_Dir(
     elif run_mode == "Evaluation":
         assert ipc > 0, "IPC must be greater than 0"
         exp_name = (
-            f"./evaluate/{dataset}/ipc{ipc}/_lr{lr:.4f}__factor{factor}_{timestamp}"
+            f"./evaluate/{dataset}/ipc{ipc}/_lr{lr:.4f}__factor{factor}_{timestamp_str}"
         )
         save_dir = os.path.join(save_dir, exp_name)
     elif run_mode == "Pretrain":
-        save_dir = pretrain_dir
+        save_dir = pretrain_dir # pretrain_dir 应该也已经包含了 timestamp_str
         exp_name = pretrain_dir
     else:
         raise ValueError(
@@ -127,9 +142,7 @@ def set_experiment_name_and_save_Dir(
     # Create save directory if the rank is 0
     if dist.get_rank() == 0:
         os.makedirs(save_dir, exist_ok=True)
-        print('--------------------------------')
-        print(f"Save dir: {save_dir}")
-        print('--------------------------------')
+    dist.barrier() # 确保 rank 0 创建完目录后其他进程再继续，避免日志等写入问题
 
     return exp_name, save_dir, lr_img
 
@@ -145,29 +158,30 @@ def set_random_seeds(seed):
 
 
 def setup_logging_and_directories(args, run_mode, save_dir):
-    # 确保所有进程都等待目录创建完成
+    # 确保所有进程都等待目录创建完成 (set_experiment_name_and_save_Dir 中已有 barrier)
+    # if dist.get_rank() == 0:
+    #     os.makedirs(save_dir, exist_ok=True)
+    #     if run_mode == "Condense":
+    #         subdirs = ["images", "distilled_data"]
+    #         for subdir in subdirs:
+    #             os.makedirs(os.path.join(save_dir, subdir), exist_ok=True)
+        
+    # args_log_path = os.path.join(save_dir, "args.log")
+    # if dist.get_rank() == 0: # 只在 rank 0 写入参数日志
+    #     with open(args_log_path, "w") as f:
+    #         json.dump(vars(args), f, indent=3) # vars(args) 可能包含不可序列化的 Logger 对象
+    
+    # 使用修改后的参数序列化
     if dist.get_rank() == 0:
-        # 创建主目录
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # 创建子目录
-        if run_mode == "Condense":
-            subdirs = ["images", "distilled_data"]
-            for subdir in subdirs:
-                os.makedirs(os.path.join(save_dir, subdir), exist_ok=True)
-        
-        # 创建并写入参数日志
         args_log_path = os.path.join(save_dir, "args.log")
+        serializable_args = {k: str(v) if isinstance(v, Logger) else v for k, v in vars(args).items()}
         with open(args_log_path, "w") as f:
-            json.dump(vars(args), f, indent=3)
+            json.dump(serializable_args, f, indent=3)
+
+    dist.barrier() 
     
-    # 确保所有进程都等待目录创建完成
-    dist.barrier()
+    logger = Logger(save_dir) # 每个进程都创建自己的 Logger 实例，但都写入同一个目录
     
-    # 创建日志记录器
-    logger = Logger(save_dir)
-    
-    # 再次同步所有进程
     dist.barrier()
     
     if dist.get_rank() == 0:
