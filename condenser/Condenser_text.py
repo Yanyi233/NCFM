@@ -203,7 +203,7 @@ class Condenser:
         # 设置学习率调度器
         if args.sampling_net:
             scheduler_sampling_net = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optim, mode="min", factor=0.5, patience=500, verbose=False
+                optim_sampling_net, mode="min", factor=0.5, patience=500, verbose=False
             )
         else:
             scheduler_sampling_net = None
@@ -216,26 +216,19 @@ class Condenser:
         gather_save_visualize(self, args)
         
         if args.local_rank == 0:
-            pbar = tqdm(range(1, args.niter))
+            pbar = tqdm(range(args.niter), desc="Condensing", unit="iter")
+        else:
+            pbar = range(args.niter)
         
-        for it in range(args.niter):
+        for it in pbar:
+            self.timing_tracker.start_step()
+
             # 更新特征提取器
             model_init, model_final, model_interval = update_feature_extractor(
                 args, model_init, model_final, model_interval, a=0, b=1
             )
-            
-            # # 确保数据在有效范围内
-            # self.data = torch.clamp(
-            #     self.data, 
-            #     min=-1, 
-            #     max=1
-            # )
-            # self.attention_mask = torch.clamp(
-            #     self.attention_mask, 
-            #     min=0, 
-            #     max=1
-            # )
-            
+            self.timing_tracker.record("update_feature_extractor")
+
             # 计算匹配损失
             match_loss_total, match_grad_mean = compute_match_loss(
                 args,
@@ -251,6 +244,7 @@ class Condenser:
                 optim_sampling_net=optim_sampling_net,
                 sampling_net=sampling_net
             )
+            self.timing_tracker.record("compute_match_loss")
             
             # 计算校准损失（如果需要）
             if args.iter_calib > 0:
@@ -266,18 +260,16 @@ class Condenser:
                     calib_weight=args.calib_weight,
                     data_grad=self.data.grad,
                 )
+                self.timing_tracker.record("compute_calib_loss")
             else:
                 calib_loss_total, calib_grad_mean = 0, 0
             
             # 同步分布式指标
-            calib_loss_total, match_loss_total, match_grad_mean, calib_grad_mean = (
-                sync_distributed_metric([
-                    calib_loss_total,
-                    match_loss_total,
-                    match_grad_mean,
-                    calib_grad_mean,
-                ])
-            )
+            metrics_to_sync = [calib_loss_total, match_loss_total, match_grad_mean, calib_grad_mean]
+            synced_metrics = sync_distributed_metric(metrics_to_sync)
+            calib_loss_total, match_loss_total, match_grad_mean, calib_grad_mean = synced_metrics[0], synced_metrics[1], synced_metrics[2], synced_metrics[3]
+
+            self.timing_tracker.record("sync_metrics")
             
             # 计算总梯度均值
             total_grad_mean = (
@@ -294,21 +286,81 @@ class Condenser:
             )
             
             # 更新损失曲线
-            plotter.update_match_loss(match_loss_total / args.nclass)
-            if args.iter_calib > 0:
-                plotter.update_calib_loss(calib_loss_total / args.nclass)
+            if args.rank == 0:
+                plotter.update_match_loss(match_loss_total / args.nclass)
+                if args.iter_calib > 0:
+                    plotter.update_calib_loss(calib_loss_total / args.nclass)
             
-            # 同步和更新进度
-            if it % args.it_log == 0:
+            self.timing_tracker.record("update_plotter")
+
+            # 日志、保存和进度条更新
+            if (it + 1) % args.it_log == 0:
                 dist.barrier()
+                if args.rank == 0:
+                    timing_stats = self.timing_tracker.report(reset=True)
+                    current_lr = optim.param_groups[0]["lr"]
+                    plotter.plot_and_save_loss_curve()
+
+                    log_message_parts = [
+                        f"\n{get_time()} (Iter {it+1:3d}/{args.niter})",
+                        f"LR: {current_lr:.6f}",
+                    ]
+                    if args.iter_calib > 0:
+                        log_message_parts.append(f"inter-loss: {calib_loss_total / args.nclass / args.iter_calib:.4f}")
+                    log_message_parts.append(f"inner-loss: {match_loss_total / args.nclass:.4f}")
+                    log_message_parts.append(f"grad-norm: {total_grad_mean / args.nclass:.7f}")
+                    log_message_parts.append(f"Timing Stats: {timing_stats}")
+                    
+                    self.logger(" ".join(log_message_parts))
+
             if args.local_rank == 0:
-                pbar.set_description(f"[Niter {it+1}/{args.niter+1}]")
-                pbar.update(1)
+                # pbar.set_description(f"[Iter {it+1}/{args.niter}] LR:{optim.param_groups[0]['lr']:.5f} MatchL:{match_loss_total/args.nclass:.3f} CalibL:{calib_loss_total/args.nclass:.3f if args.iter_calib > 0 else 0:.3f}")
+                calib_l_formatted = calib_loss_total / args.nclass if args.iter_calib > 0 else 0.0
+                pbar.set_description(
+                    f"[Iter {it+1}/{args.niter}] LR:{optim.param_groups[0]['lr']:.5f} "
+                    f"MatchL:{match_loss_total/args.nclass:.3f} "
+                    f"CalibL:{calib_l_formatted:.3f}"
+                )
+
+            # 按指定迭代或间隔保存数据
+            # hasattr(args, 'it_save') and args.it_save and (it + 1) in args.it_save:
+            #    self.logger(f"Iteration {it + 1} is in args.it_save. Saving data.")
+            #    gather_save_visualize(self, args, iteration=it)
+            # elif (it + 1) % args.save_interval == 0: # 这行导致 AttributeError
+            #    self.logger(f"Reached save interval at iteration {it + 1}. Saving data.")
+            #    gather_save_visualize(self, args, iteration=it)
             
+            should_save = False
+            save_reason = ""
+
+            if hasattr(args, 'it_save') and args.it_save and (it + 1) in args.it_save:
+                should_save = True
+                save_reason = f"Iteration {it + 1} is in args.it_save."
+            
+            # 仅当 save_interval 在 args 中定义且大于0时才检查基于间隔的保存
+            current_save_interval = getattr(args, 'save_interval', 0) # 默认为0，表示不基于此间隔保存
+            if not should_save and current_save_interval > 0 and (it + 1) % current_save_interval == 0:
+                should_save = True
+                save_reason = f"Reached save interval at iteration {it + 1}."
+
+            if should_save:
+                self.logger(f"{save_reason} Saving data.")
+                gather_save_visualize(self, args, iteration=it)
+            
+            self.timing_tracker.record("save_data_if_needed")
+
             # 更新学习率
             scheduler.step(current_loss)
             if scheduler_sampling_net is not None:
                 scheduler_sampling_net.step(current_loss)
+            self.timing_tracker.record("scheduler_step")
+
+        # 训练结束后最后保存一次
+        self.logger(f"Condensation finished after {args.niter} iterations. Final Gather and Save Data!")
+        gather_save_visualize(self, args, iteration=args.niter -1)
+        
+        if args.local_rank == 0:
+            pbar.close()
 
     def evaluate(self, args, syndataloader, val_loader):
         if args.rank == 0:

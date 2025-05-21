@@ -12,7 +12,19 @@ import matplotlib.pyplot as plt
 class TimingTracker:
     def __init__(self, logger):
         self.print = logger
-        self.timing_stats = {"data": 0, "aug": 0, "loss": 0, "backward": 0}
+        self.timing_stats = {
+            "data": 0, 
+            "aug": 0, 
+            "loss": 0, 
+            "backward": 0,
+            "update_feature_extractor": 0,
+            "compute_match_loss": 0,
+            "compute_calib_loss": 0,
+            "sync_metrics": 0,
+            "update_plotter": 0,
+            "save_data_if_needed": 0,
+            "scheduler_step": 0,
+        }
 
     def start_step(self):
         self.step_start_time = time.time()

@@ -81,7 +81,7 @@ def init_script(args):
 
 def set_iteration_parameters(niter, debug):
 
-    it_save = np.arange(0, niter + 1, 1000).tolist()
+    it_save = np.arange(0, niter + 1, 200).tolist()
     it_log = 1 if debug else 20
     return it_save, it_log
 
@@ -159,22 +159,20 @@ def set_random_seeds(seed):
 
 def setup_logging_and_directories(args, run_mode, save_dir):
     # 确保所有进程都等待目录创建完成 (set_experiment_name_and_save_Dir 中已有 barrier)
-    # if dist.get_rank() == 0:
-    #     os.makedirs(save_dir, exist_ok=True)
-    #     if run_mode == "Condense":
-    #         subdirs = ["images", "distilled_data"]
-    #         for subdir in subdirs:
-    #             os.makedirs(os.path.join(save_dir, subdir), exist_ok=True)
-        
-    # args_log_path = os.path.join(save_dir, "args.log")
-    # if dist.get_rank() == 0: # 只在 rank 0 写入参数日志
-    #     with open(args_log_path, "w") as f:
-    #         json.dump(vars(args), f, indent=3) # vars(args) 可能包含不可序列化的 Logger 对象
+    if dist.get_rank() == 0:
+        os.makedirs(save_dir, exist_ok=True) # 主保存目录在这里创建
+        if run_mode == "Condense":
+            subdirs = ["images", "distilled_data"] # "distilled_data" 在这里
+            for subdir in subdirs:
+                os.makedirs(os.path.join(save_dir, subdir), exist_ok=True) # 子目录创建
     
     # 使用修改后的参数序列化
     if dist.get_rank() == 0:
         args_log_path = os.path.join(save_dir, "args.log")
-        serializable_args = {k: str(v) if isinstance(v, Logger) else v for k, v in vars(args).items()}
+        serializable_args = {
+            k: str(v) if isinstance(v, (Logger, torch.device)) else v 
+            for k, v in vars(args).items()
+        }
         with open(args_log_path, "w") as f:
             json.dump(serializable_args, f, indent=3)
 
