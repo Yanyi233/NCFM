@@ -22,7 +22,7 @@ network:
   norm_type: layernorm          # 使用 batch (或 instance)
   depth: 12                 
   layer_index: [3, 6, 9, 12]
-  max_length: 512
+  max_length: 128
   # width: 1.0                # 在resnet18中，不使用该参数
 
 # 训练配置 (用于 Pretrain 和 Evaluation)

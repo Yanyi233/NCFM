@@ -540,11 +540,15 @@ class MultiLabelClassMemDataLoader:
         # 构建类别索引
         self.cls_idx = [[] for _ in range(self.nclass)]
         print("Building class indices from preloaded multi-hot targets...")
-        for i in tqdm(range(self.targets.shape[0]), desc="Indexing samples"):
-            target_vector = self.targets[i]
-            for c in range(self.nclass):
-                if target_vector[c] > 0:
-                    self.cls_idx[c].append(i)
+        # for i in tqdm(range(self.targets.shape[0]), desc="Indexing samples"):
+        #     target_vector = self.targets[i]
+        #     for c in range(self.nclass):
+        #         if target_vector[c] > 0:
+        #             self.cls_idx[c].append(i)
+        for c in tqdm(range(self.nclass), desc="Indexing samples"):
+            # 找出第 c 列（代表类别 c）中所有大于 0 的元素的行索引
+            positive_samples_for_class_c = (self.targets[:, c] > 0).nonzero(as_tuple=True)[0]
+            self.cls_idx[c] = positive_samples_for_class_c.tolist()
 
         for c in range(self.nclass):
             # print(f"Class {c} has {len(self.cls_idx[c])} samples.")

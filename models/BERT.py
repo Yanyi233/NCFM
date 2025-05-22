@@ -13,7 +13,6 @@ class BERTWithFeatures(nn.Module):
         if hasattr(self.bert, 'embeddings'):
             for param in self.bert.embeddings.parameters():
                 param.requires_grad_(False)
-            print("Disabled gradients for BERT embeddings layer.") # 可选的日志输出
 
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, embedding=None, return_features=False):
         if embedding is not None:

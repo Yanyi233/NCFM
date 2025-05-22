@@ -1,6 +1,7 @@
 import torch
 import torchvision.datasets as datasets
 from data.dataset_statistics import IMG_EXTENSIONS, STDS, MEANS
+import numpy as np
 
 
 class Data:

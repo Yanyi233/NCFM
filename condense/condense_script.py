@@ -99,7 +99,7 @@ if __name__ == '__main__':
     parser.add_argument('--config_path', type=str, required=True, help='Path to the YAML configuration file')
     parser.add_argument('--run_mode',type=str,choices=['Condense', 'Evaluation',"Pretrain"],default='Condense',help='Condense or Evaluation')
     parser.add_argument('-a','--aug_type',type=str,default='color_crop_cutout',help='augmentation strategy for condensation matching objective')
-    parser.add_argument('--init',type=str,default='mix',choices=['random', 'noise', 'mix', 'load'],help='condensed data initialization type')
+    parser.add_argument('--init',type=str,default='noise',choices=['random', 'noise', 'mix', 'load'],help='condensed data initialization type')
     parser.add_argument('--load_path',type=str,default=None,help="Path to load the synset")
     parser.add_argument('--gpu', type=str, default = "0",required=True, help='GPUs to use, e.g., "0,1,2,3"') 
     parser.add_argument('-i', '--ipc', type=int, default=1,required=True, help='number of condensed data per class')
