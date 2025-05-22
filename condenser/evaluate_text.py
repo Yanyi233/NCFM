@@ -3,10 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 from utils.experiment_tracker import get_time
 from utils.diffaug import DiffAug
-from utils.utils import define_model
+from utils.utils_text import define_model
 from utils.ddp import load_state_dict
 import warnings
-from utils.train_val import train_epoch, validate, train_epoch_softlabel
+from utils.train_val_text import train_epoch, validate, train_epoch_softlabel
 
 warnings.filterwarnings("ignore")
 import torch.nn.functional as F
@@ -25,21 +25,21 @@ def SoftCrossEntropy(inputs, target, temperature=1.0, reduction="average"):
 
 # loss_function_kl = nn.KLDivLoss(reduction="batchmean")
 def evaluate_syn_data(args, model, train_loader, val_loader, logger=None):
-    if args.softlabel:
-        teacher_model = define_model(
-            args.dataset,
-            args.norm_type,
-            args.net_type,
-            args.nch,
-            args.depth,
-            args.width,
-            args.nclass,
-            args.logger,
-            args.size,
-        ).to(args.device)
-        teacher_path = os.path.join(args.pretrain_dir, f"premodel0_trained.pth.tar")
-        load_state_dict(teacher_path, teacher_model)
-        train_criterion_sl = SoftCrossEntropy
+    # if args.softlabel:
+    #     teacher_model = define_model(
+    #         args.dataset,
+    #         args.norm_type,
+    #         args.net_type,
+    #         args.nch,
+    #         args.depth,
+    #         args.width,
+    #         args.nclass,
+    #         args.logger,
+    #         args.size,
+    #     ).to(args.device)
+    #     teacher_path = os.path.join(args.pretrain_dir, f"premodel0_trained.pth.tar")
+    #     load_state_dict(teacher_path, teacher_model)
+    #     train_criterion_sl = SoftCrossEntropy
     if args.is_multilabel:
         train_criterion = nn.BCEWithLogitsLoss().cuda()
         val_criterion = nn.BCEWithLogitsLoss().cuda()
@@ -94,17 +94,18 @@ def evaluate_syn_data(args, model, train_loader, val_loader, logger=None):
         if args.softlabel and epoch < (
             args.evaluation_epochs - args.epoch_eval_interval
         ):
-            metrics = train_epoch_softlabel(
-                args,
-                train_loader,
-                model,
-                teacher_model,
-                train_criterion_sl,
-                optimizer,
-                epoch,
-                aug,
-                mixup=args.mixup,
-            )
+            # metrics = train_epoch_softlabel(
+            #     args,
+            #     train_loader,
+            #     model,
+            #     teacher_model,
+            #     train_criterion_sl,
+            #     optimizer,
+            #     epoch,
+            #     aug,
+            #     mixup=args.mixup,
+            # )
+            pass
         else:
             metrics = train_epoch(
                 args,

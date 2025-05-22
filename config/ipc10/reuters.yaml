@@ -32,7 +32,7 @@ train:
   epoch_eval_interval: 10    # 评估间隔 (轮)
   pertrain_epochs: 25       # 预训练模式下的轮数 (根据需要调整)
   batch_size: 128            # 预训练/评估时的训练批次大小 (会被 world_size 除)
-  lr: 0.0001                  # 学习率
+  lr: 0.001                  # 学习率
   adamw_lr: 0.0001            # 如果 eval_optimizer 是 adamw
   eval_optimizer: sgd      # 评估时使用的优化器 (adam 或 sgd)
   momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)  

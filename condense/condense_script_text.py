@@ -53,7 +53,7 @@ def check_args(args):
 
 def main_worker(args):
     
-    args.class_list = distribute_class(args.nclass,args.debug)
+    args.class_list = distribute_class(args.nclass, args.debug)
 
     plotter = get_plotter(args)
 

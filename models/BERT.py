@@ -9,6 +9,12 @@ class BERTWithFeatures(nn.Module):
         hidden_size = self.bert.config.hidden_size
         self.classifier = nn.Linear(hidden_size, num_classes)
 
+        # 在初始化时直接禁用 BERT 内部 embedding 层的梯度
+        if hasattr(self.bert, 'embeddings'):
+            for param in self.bert.embeddings.parameters():
+                param.requires_grad_(False)
+            print("Disabled gradients for BERT embeddings layer.") # 可选的日志输出
+
     def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, embedding=None, return_features=False):
         if embedding is not None:
             # 处理合成样本 (embedding 形状: [batch_size, seq_len, hidden_size])
@@ -20,12 +26,17 @@ class BERTWithFeatures(nn.Module):
                 batch_size, seq_len, _ = embedding.shape
                 attention_mask = torch.ones(batch_size, seq_len, device=embedding.device, dtype=torch.long)
             
+            # 注意：这里不再需要动态修改 embedding 层的 requires_grad
             outputs = self.bert(inputs_embeds=embedding, 
                                 attention_mask=attention_mask, 
                                 token_type_ids=token_type_ids,
                                 output_hidden_states=True)
         elif input_ids is not None:
             # 处理真实样本
+            # 注意：这里也不再需要动态修改 embedding 层的 requires_grad
+            # 因为在 __init__ 中已经将其设置为 False
+            # 如果这里传入 input_ids，BERT 内部的 embedding 层仍然会被调用，
+            # 但由于其参数的 requires_grad 为 False，所以不会计算和累积梯度。
             outputs = self.bert(input_ids=input_ids, 
                                 attention_mask=attention_mask, 
                                 token_type_ids=token_type_ids, 
@@ -42,11 +53,11 @@ class BERTWithFeatures(nn.Module):
             return logits
         
     def get_feature(self, input_ids=None, attention_mask=None, token_type_ids=None, embedding=None):
+        # 在这个实现中，get_feature 不需要再单独处理梯度，
+        # 因为bert.embeddings的梯度已经在__init__中被禁用了。
         if embedding is not None:
-            # 处理合成样本
             batch_size, seq_len, _ = embedding.shape
             if attention_mask is None:
-                # 为合成样本生成全1的 attention_mask
                 attention_mask = torch.ones(batch_size, seq_len, device=embedding.device, dtype=torch.long)
             
             outputs = self.bert(inputs_embeds=embedding, 
@@ -54,13 +65,12 @@ class BERTWithFeatures(nn.Module):
                                 token_type_ids=token_type_ids,
                                 output_hidden_states=True)
         elif input_ids is not None:
-            # 处理真实样本
             outputs = self.bert(input_ids=input_ids,
                                 attention_mask=attention_mask,
                                 token_type_ids=token_type_ids,
                                 output_hidden_states=True)
         else:
-            raise ValueError("Either 'input_ids' or 'embedding' must be provided to get_feature_last_layer.")
+            raise ValueError("Either 'input_ids' or 'embedding' must be provided to get_feature.")
         
         return outputs.hidden_states, outputs.pooler_output
 

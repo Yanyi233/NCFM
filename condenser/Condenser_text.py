@@ -9,8 +9,8 @@ from NCFM.NCFM_text import match_loss, cailb_loss, mutil_layer_match_loss, CFLos
 from NCFM.SampleNet import SampleNet
 from utils.experiment_tracker import TimingTracker, get_time
 from data.dataset import TensorDataset
-from utils.utils_text import define_model
-from .evaluate import evaluate_syn_data
+from utils.utils_text import define_model, define_language_model
+from .evaluate_text import evaluate_syn_data
 from torch.utils.data import DistributedSampler, DataLoader
 from .compute_loss_text import compute_match_loss, compute_calib_loss
 from data.dataloader import MultiEpochsDataLoader
@@ -107,9 +107,8 @@ class Condenser:
             if dist.get_rank() == 0:
                 self.logger("==================designed path initialize condense dataset ===================")
             data_dict = torch.load(load_path)
-            self.data = data_dict['data'].to(self.device)
-            self.attention_mask = data_dict['attention_mask'].to(self.device)
-            self.targets = data_dict['targets'].to(self.device)
+            self.data = data_dict[0].to(self.device)
+            self.targets = data_dict[1].to(self.device)
 
     def parameters(self):
         """返回需要优化的参数"""
@@ -136,21 +135,21 @@ class Condenser:
         # 但可能需要文本特定的数据增强
         train_transform = None  # 文本数据增强可以在这里添加
         
-        data_dec = []
-        target_dec = []
-        for c in self.nclass_list:
-            # 对于多标签情况，检查targets中第c个位置是否为1
-            target_mask = self.targets[:, c] == 1
-            data = self.data[target_mask].detach()
-            attention_mask = self.attention_mask[target_mask].detach()
-            target = self.targets[target_mask].detach()
+        # data_dec = []
+        # target_dec = []
+        # for c in self.nclass_list:
+        #     # 对于多标签情况，检查targets中第c个位置是否为1
+        #     target_mask = self.targets[:, c] == 1
+        #     data = self.data[target_mask].detach()
+        #     target = self.targets[target_mask].detach()
             
-            data_dec.append(data)
-            target_dec.append(target)
+        #     data_dec.append(data)
+        #     target_dec.append(target)
 
-        # 合并所有类别的数据
-        combined_data = torch.cat(data_dec)
-        combined_targets = torch.cat(target_dec)
+        # # 合并所有类别的数据
+        combined_data = self.data.detach().cpu()
+        combined_targets = self.targets.detach().cpu()
+
         
         if args.rank == 0:
             print("Decode condensed data: ", combined_data.shape)
@@ -365,43 +364,67 @@ class Condenser:
     def evaluate(self, args, syndataloader, val_loader):
         if args.rank == 0:
             args.logger("======================Start Evaluation ======================")
-        results = []
-        all_best_acc = 0
+        
+        results_best_mAP_per_run = []  # Stores the best mAP from each repeat
+        results_f1_at_best_mAP_per_run = [] # Stores the F1 when best mAP was achieved in each repeat
+
+        overall_best_mAP_across_repeats = 0.0 # Tracks the absolute best mAP across all repeats
+        f1_for_overall_best_mAP = 0.0         # F1 for the overall_best_mAP_across_repeats
+
         for i in range(args.val_repeat):
             if args.rank == 0:
                 args.logger(
                     f"======================Repeat {i+1}/{args.val_repeat} Starting =================================================================="
                 )
-            model = define_model(
-                args.dataset,
-                args.norm_type,
-                args.net_type,
-                args.nch,
-                args.depth,
-                args.width,
-                args.nclass,
-                args.logger,
-                args.size,
+            
+            model = define_language_model(
+                args.model_path, 
+                args.net_type, 
+                args.nclass 
             ).to(args.device)
-            best_acc, acc = evaluate_syn_data(
+
+            # evaluate_syn_data returns: best_mAP_this_run, f1_at_best_mAP_this_run, last_mAP, last_f1
+            best_mAP_this_run, f1_at_best_mAP_this_run, last_mAP, last_f1 = evaluate_syn_data(
                 args, model, syndataloader, val_loader, logger=args.logger
             )
-            if all_best_acc < best_acc:
-                all_best_acc = best_acc
-            results.append(best_acc)
+            
+            results_best_mAP_per_run.append(best_mAP_this_run)
+            results_f1_at_best_mAP_per_run.append(f1_at_best_mAP_this_run)
+            
+            if best_mAP_this_run > overall_best_mAP_across_repeats:
+                overall_best_mAP_across_repeats = best_mAP_this_run
+                f1_for_overall_best_mAP = f1_at_best_mAP_this_run
+            
             if args.rank == 0:
+                log_metric_name = "mAP" if args.is_multilabel else "Top-1 Acc"
                 args.logger(
-                    f"Repeat {i+1}/{args.val_repeat} => The Best Evaluation Acc: {all_best_acc:.1f} The Last Evaluation Acc :{acc:.1f} \n"
+                    f"Repeat {i+1}/{args.val_repeat} => Best {log_metric_name} for this run: {best_mAP_this_run:.4f} (F1 at this point: {f1_at_best_mAP_this_run:.4f})"
                 )
-        mean_result = np.mean(results)
-        std_result = np.std(results)
+                args.logger(
+                    f"Last Epoch {log_metric_name}: {last_mAP:.4f}, Last Epoch F1: {last_f1:.4f}"
+                )
+                args.logger(
+                    f"Overall Best {log_metric_name} so far: {overall_best_mAP_across_repeats:.4f} (F1 for this {log_metric_name}: {f1_for_overall_best_mAP:.4f})"
+                )
+        
+        mean_best_mAP = np.mean(results_best_mAP_per_run)
+        std_best_mAP = np.std(results_best_mAP_per_run)
+        # Optionally, calculate mean of F1s at best mAPs if meaningful
+        # mean_f1_at_best_mAP = np.mean(results_f1_at_best_mAP_per_run) 
+        
         if args.rank == 0:
+            log_metric_name = "mAP" if args.is_multilabel else "Top-1 Acc"
             args.logger("=" * 50)
             args.logger(f"Evaluation Stop:")
             args.logger(
-                f"Mean Accuracy: {mean_result:.3f}", f"Std Deviation: {std_result:.3f}"
+                f"Mean Best {log_metric_name} over repeats: {mean_best_mAP:.4f}", 
+                f"Std Dev of Best {log_metric_name}: {std_best_mAP:.4f}"
             )
-            args.logger(f"All result: {[f'{x:.3f}' for x in results]}")
+            # args.logger(
+            #     f"Mean F1 at Best {log_metric_name} over repeats: {mean_f1_at_best_mAP:.4f}" # Optional
+            # )
+            args.logger(f"All Best {log_metric_name} results per repeat: {[f'{x:.4f}' for x in results_best_mAP_per_run]}")
+            args.logger(f"Corresponding F1s at these Best {log_metric_name}s: {[f'{x:.4f}' for x in results_f1_at_best_mAP_per_run]}")
             args.logger("=" * 50)
 
     def continue_learning(self, args, syndataloader, val_loader):

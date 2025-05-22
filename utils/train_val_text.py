@@ -55,78 +55,81 @@ def train_epoch(
     model.train()
     end = time.time()
     for i, batch in enumerate(train_loader):
-        if isinstance(batch, dict):
-            input_ids = batch['input_ids'].cuda(non_blocking=True)
-            attention_mask = batch['attention_mask'].cuda(non_blocking=True)
-            token_type_ids = batch.get('token_type_ids', None)
-            if token_type_ids is not None:
-                token_type_ids = token_type_ids.cuda(non_blocking=True)
-            target = batch['labels'].cuda(non_blocking=True)
-        else:
-            input_ids, target = batch
-            input_ids = input_ids.cuda(non_blocking=True)
-            target = target.cuda(non_blocking=True)
-            attention_mask = None
-            token_type_ids = None
-
-        if args.is_multilabel:
-            target_float = target.float()
-        else:
-            target_float = target
-
         data_time.update(time.time() - end)
 
-        if aug is not None:
+        input_ids_arg = None
+        attention_mask_arg = None
+        token_type_ids_arg = None
+        embeddings_arg = None
+        target_labels = None
+        current_batch_size = 0
+
+        if isinstance(batch, dict):
+            # Real data (dictionary format)
+            input_ids_arg = batch['input_ids'].cuda(non_blocking=True)
+            attention_mask_arg = batch['attention_mask'].cuda(non_blocking=True)
+            token_type_ids_arg = batch.get('token_type_ids', None)
+            if token_type_ids_arg is not None:
+                token_type_ids_arg = token_type_ids_arg.cuda(non_blocking=True)
+            target_labels = batch['labels'].cuda(non_blocking=True)
+            current_batch_size = input_ids_arg.size(0)
+        else:
+            # Synthetic data (tuple: embeddings, targets)
+            data_input, target_labels = batch
+            embeddings_arg = data_input.cuda(non_blocking=True)
+            target_labels = target_labels.cuda(non_blocking=True)
+            current_batch_size = embeddings_arg.size(0)
+            # For embeddings, attention_mask and token_type_ids are often managed by the model if None
+            if embeddings_arg.ndim != 3:
+                raise ValueError(f"Expected 3D embeddings for synthetic data, got shape {embeddings_arg.shape}")
+
+        if args.is_multilabel:
+            target_float = target_labels.float()
+        else:
+            target_float = target_labels
+
+        # Augmentation (if applicable and input_ids_arg is present)
+        if aug is not None and input_ids_arg is not None:
             with torch.no_grad():
-                input_ids = aug(input_ids)
-        # r = np.random.rand(1)
-        # if r < args.mix_p and mixup == "cut":
-        #     if args.is_multilabel:
-        #         output = model(input)
-        #         loss = criterion(output, target_float)
-        #     else:
-        #         lam = np.random.beta(args.beta, args.beta)
-        #         rand_index = random_indices(target, nclass=args.nclass)
-        #         target_b = target[rand_index]
-        #         bbx1, bby1, bbx2, bby2 = rand_bbox(input.size(), lam)
-        #         input[:, :, bbx1:bbx2, bby1:bby2] = input[
-        #             rand_index, :, bbx1:bbx2, bby1:bby2
-        #         ]
-        #         ratio = 1 - (
-        #             (bbx2 - bbx1) * (bby2 - bby1) / (input.size()[-1] * input.size()[-2])
-        #         )
-        #         output = model(input)
-        #         loss = criterion(output, target) * ratio + criterion(output, target_b) * (
-        #             1.0 - ratio
-        #         )
-        # else:
-        output = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+                input_ids_arg = aug(input_ids_arg)
+        
+        # Model forward pass
+        # BERT.py's forward method handles `embedding` or `input_ids`
+        output = model(
+            input_ids=input_ids_arg,
+            attention_mask=attention_mask_arg,
+            token_type_ids=token_type_ids_arg,
+            embedding=embeddings_arg
+        )
         loss = criterion(output, target_float)
 
         if args.is_multilabel:
             with torch.no_grad():
                 scores = torch.sigmoid(output.data)
-                preds = (scores > 0.35).cpu().numpy().astype(int)
-                targets_np = target.cpu().numpy().astype(int)
+                # Ensure prediction threshold is appropriate, e.g. 0.5 for general cases
+                # Using args.pred_threshold if available, otherwise a common default like 0.5
+                pred_threshold = getattr(args, 'pred_threshold', 0.5)
+                preds = (scores > pred_threshold).cpu().numpy().astype(int)
+                targets_np = target_labels.cpu().numpy().astype(int)
 
                 batch_prec_micro = precision_score(targets_np, preds, average='micro', zero_division=0)
                 batch_rec_micro = recall_score(targets_np, preds, average='micro', zero_division=0)
                 batch_f1_micro = f1_score(targets_np, preds, average='micro', zero_division=0)
                 batch_hamming = hamming_loss(targets_np, preds)
 
-                prec_micro.update(batch_prec_micro, input_ids.size(0))
-                rec_micro.update(batch_rec_micro, input_ids.size(0))
-                f1_micro.update(batch_f1_micro, input_ids.size(0))
-                hamming.update(batch_hamming, input_ids.size(0))
+                prec_micro.update(batch_prec_micro, current_batch_size)
+                rec_micro.update(batch_rec_micro, current_batch_size)
+                f1_micro.update(batch_f1_micro, current_batch_size)
+                hamming.update(batch_hamming, current_batch_size)
 
                 all_outputs_list.append(output.cpu())
-                all_targets_list.append(target.cpu())
+                all_targets_list.append(target_labels.cpu())
         else:
-            acc1, acc5 = accuracy(output.data, target, topk=(1, 5))
-            top1.update(acc1.item(), input_ids.size(0))
-            top5.update(acc5.item(), input_ids.size(0))
+            acc1, acc5 = accuracy(output.data, target_labels, topk=(1, 5))
+            top1.update(acc1.item(), current_batch_size)
+            top5.update(acc5.item(), current_batch_size)
 
-        losses.update(loss.item(), input_ids.size(0))
+        losses.update(loss.item(), current_batch_size)
 
         optimizer.zero_grad()
         loss.backward()
@@ -142,22 +145,27 @@ def train_epoch(
         metrics['f1_micro'] = f1_micro.avg
         metrics['hamming'] = hamming.avg
         
-        # 计算mAP
-        if all_targets_list:
+        if all_targets_list and all_outputs_list: # Ensure lists are not empty
             all_outputs = torch.cat(all_outputs_list, dim=0)
             all_targets = torch.cat(all_targets_list, dim=0)
             scores = torch.sigmoid(all_outputs).numpy()
             targets_np = all_targets.numpy().astype(int)
             
             try:
-                ap_per_class = [average_precision_score(targets_np[:, i], scores[:, i])
-                              for i in range(targets_np.shape[1]) if np.sum(targets_np[:, i]) > 0]
+                # Filter out classes with no true samples for AP calculation
+                ap_per_class = []
+                for i in range(targets_np.shape[1]):
+                    if np.sum(targets_np[:, i]) > 0:
+                        ap_per_class.append(average_precision_score(targets_np[:, i], scores[:, i]))
+                
                 mAP_value = np.mean([ap for ap in ap_per_class if not np.isnan(ap)]) if ap_per_class else 0.0
             except ValueError as e:
-                print(f"Warning: Could not compute mAP. Error: {e}")
+                print(f"Warning: Could not compute mAP during training. Error: {e}")
                 mAP_value = 0.0
                 
             metrics['mAP'] = mAP_value
+        else:
+            metrics['mAP'] = 0.0 # Default if no data to compute
     else:
         metrics['top1'] = top1.avg
         metrics['top5'] = top5.avg
@@ -330,48 +338,67 @@ def validate(args, val_loader, model, criterion):
     batch_time = AverageMeter()
     losses = AverageMeter()
 
-    if args.is_multilabel:
-        pass
-    else:
-        top1 = AverageMeter()
-        top5 = AverageMeter()
+    # Metrics initialization (moved from inside if/else for clarity)
+    all_targets_list = []
+    all_outputs_list = []
+    
+    # For single-label, top1/top5 will be populated if not args.is_multilabel
+    top1 = AverageMeter() 
+    top5 = AverageMeter()
 
     model.eval()
     end = time.time()
 
-    all_targets_list = []
-    all_outputs_list = []
-
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
-            if isinstance(batch, dict):
-                input_ids = batch['input_ids'].to(args.device, non_blocking=True)
-                attention_mask = batch['attention_mask'].to(args.device, non_blocking=True)
-                token_type_ids = batch.get('token_type_ids', None)
-                if token_type_ids is not None:
-                    token_type_ids = token_type_ids.to(args.device, non_blocking=True)
-                target = batch['labels'].to(args.device, non_blocking=True)
-            else:
-                input_ids, target = batch
-                input_ids = input_ids.to(args.device, non_blocking=True)
-                target = target.to(args.device, non_blocking=True)
-                attention_mask = None
-                token_type_ids = None
+            input_ids_arg = None
+            attention_mask_arg = None
+            token_type_ids_arg = None
+            embeddings_arg = None
+            target_labels = None
+            current_batch_size = 0
 
-            target_float = target.float() if args.is_multilabel else target
+            if isinstance(batch, dict): # Real data (dictionary format)
+                input_ids_arg = batch['input_ids'].to(args.device, non_blocking=True)
+                attention_mask_arg = batch['attention_mask'].to(args.device, non_blocking=True)
+                token_type_ids_arg = batch.get('token_type_ids', None)
+                if token_type_ids_arg is not None:
+                    token_type_ids_arg = token_type_ids_arg.to(args.device, non_blocking=True)
+                target_labels = batch['labels'].to(args.device, non_blocking=True)
+                current_batch_size = input_ids_arg.size(0)
+            else: # Synthetic data or other tuple format (data_input, target_labels)
+                data_input, target_labels = batch
+                data_input_cuda = data_input.to(args.device, non_blocking=True)
+                target_labels = target_labels.to(args.device, non_blocking=True)
+                current_batch_size = data_input_cuda.size(0)
 
-            output = model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)
+                if data_input_cuda.ndim == 3: # Synthetic Embeddings
+                    embeddings_arg = data_input_cuda
+                elif data_input_cuda.ndim == 2: # Fallback for tokenized data in tuple
+                    input_ids_arg = data_input_cuda
+                else:
+                    raise ValueError(f"Unexpected data_input shape in validate: {data_input_cuda.shape}")
+                # attention_mask and token_type_ids are assumed to be handled by model for embeddings
+
+            target_float = target_labels.float() if args.is_multilabel else target_labels
+
+            output = model(
+                input_ids=input_ids_arg,
+                attention_mask=attention_mask_arg,
+                token_type_ids=token_type_ids_arg,
+                embedding=embeddings_arg
+            )
             loss = criterion(output, target_float)
 
-            losses.update(loss.item(), input_ids.size(0))
+            losses.update(loss.item(), current_batch_size)
 
             if args.is_multilabel:
                 all_outputs_list.append(output.cpu())
-                all_targets_list.append(target.cpu())
+                all_targets_list.append(target_labels.cpu())
             else:
-                acc1, acc5 = accuracy(output.data, target, topk=(1, 5))
-                top1.update(acc1.item(), input_ids.size(0))
-                top5.update(acc5.item(), input_ids.size(0))
+                acc1, acc5 = accuracy(output.data, target_labels, topk=(1, 5))
+                top1.update(acc1.item(), current_batch_size)
+                top5.update(acc5.item(), current_batch_size)
 
             batch_time.update(time.time() - end)
             end = time.time()
@@ -379,20 +406,22 @@ def validate(args, val_loader, model, criterion):
     metrics = {'loss': losses.avg}
 
     if args.is_multilabel:
-        if not all_targets_list:
-            print("Warning: Validation set is empty or yielded no data.")
+        if not all_targets_list or not all_outputs_list: # Check if lists are empty
+            print("Warning: Validation set yielded no data for metric calculation.")
             metrics.update({
                 'prec_micro': 0.0, 'rec_micro': 0.0, 'f1_micro': 0.0,
                 'prec_macro': 0.0, 'rec_macro': 0.0, 'f1_macro': 0.0,
-                'hamming': 1.0, 'mAP': 0.0
+                'hamming': 1.0, 'mAP': 0.0 # Default to worst/neutral values
             })
         else:
-            all_outputs = torch.cat(all_outputs_list, dim=0)
-            all_targets = torch.cat(all_targets_list, dim=0)
+            all_outputs_tensor = torch.cat(all_outputs_list, dim=0)
+            all_targets_tensor = torch.cat(all_targets_list, dim=0)
 
-            scores = torch.sigmoid(all_outputs).numpy()
-            preds = (scores > 0.5).astype(int)
-            targets_np = all_targets.numpy().astype(int)
+            scores = torch.sigmoid(all_outputs_tensor).numpy()
+            # Ensure prediction threshold is appropriate, e.g. 0.5 for general cases
+            pred_threshold = getattr(args, 'pred_threshold', 0.5)
+            preds = (scores > pred_threshold).astype(int)
+            targets_np = all_targets_tensor.numpy().astype(int)
 
             prec_micro = precision_score(targets_np, preds, average='micro', zero_division=0)
             rec_micro = recall_score(targets_np, preds, average='micro', zero_division=0)
@@ -403,11 +432,15 @@ def validate(args, val_loader, model, criterion):
             h_loss = hamming_loss(targets_np, preds)
 
             try:
-                ap_per_class = [average_precision_score(targets_np[:, i], scores[:, i])
-                                for i in range(targets_np.shape[1]) if np.sum(targets_np[:, i]) > 0]
+                # Filter out classes with no true samples for AP calculation
+                ap_per_class = []
+                for i in range(targets_np.shape[1]):
+                    if np.sum(targets_np[:, i]) > 0: # Only calculate AP for classes with positive labels
+                         ap_per_class.append(average_precision_score(targets_np[:, i], scores[:, i]))
+                
                 mAP = np.mean([ap for ap in ap_per_class if not np.isnan(ap)]) if ap_per_class else 0.0
             except ValueError as e:
-                print(f"Warning: Could not compute mAP. Error: {e}")
+                print(f"Warning: Could not compute mAP during validation. Error: {e}")
                 mAP = 0.0
 
             metrics.update({
