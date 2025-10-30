@@ -10,6 +10,7 @@ import torch.optim as optim
 from utils.utils_text import define_language_model
 from utils.utils_text import get_loader
 from utils.train_val_text import train_epoch, validate
+from transformers import get_linear_schedule_with_warmup
 # from utils.diffaug import diffaug
 
 def check_args(args):
@@ -17,37 +18,51 @@ def check_args(args):
     if not hasattr(args, 'dataset'):
         args.dataset = 'reuters'  # 默认数据集
         if args.rank == 0:
-            print(f"Warning: 'dataset' not found in args, using default: {args.dataset}")
+            args.logger(f"Warning: 'dataset' not found in args, using default: {args.dataset}")
     
     if not hasattr(args, 'norm_type'):
         args.norm_type = 'layernorm'  # 默认归一化类型
         if args.rank == 0:
-            print(f"Warning: 'norm_type' not found in args, using default: {args.norm_type}")
+            args.logger(f"Warning: 'norm_type' not found in args, using default: {args.norm_type}")
     
     if not hasattr(args, 'net_type'):
         args.net_type = 'BERT'  # 默认网络类型
         if args.rank == 0:
-            print(f"Warning: 'net_type' not found in args, using default: {args.net_type}")
+            args.logger(f"Warning: 'net_type' not found in args, using default: {args.net_type}")
     
     if not hasattr(args, 'depth'):
         args.depth = 12  # 默认网络深度
         if args.rank == 0:
-            print(f"Warning: 'depth' not found in args, using default: {args.depth}")
+            args.logger(f"Warning: 'depth' not found in args, using default: {args.depth}")
     
     if not hasattr(args, 'nclass'):
         args.nclass = 90  # 默认类别数
         if args.rank == 0:
-            print(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
+            args.logger(f"Warning: 'nclass' not found in args, using default: {args.nclass}")
     
     if not hasattr(args, 'max_length'):
         args.max_length = 512  # 默认文本最大长度
         if args.rank == 0:
-            print(f"Warning: 'max_length' not found in args, using default: {args.max_length}")
+            args.logger(f"Warning: 'max_length' not found in args, using default: {args.max_length}")
     
     if not hasattr(args, 'is_multilabel'):
         args.is_multilabel = True  # 默认为多标签分类
         if args.rank == 0:
-            print(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
+            args.logger(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
+    if not hasattr(args, 'warmup_steps'):
+        args.warmup_steps = 100
+        if args.rank == 0:
+            args.logger(f"Warning: 'warmup_steps' not found in args, using default: {args.warmup_steps}")
+    if not hasattr(args, 'pred_threshold'):
+        args.pred_threshold = 0.3
+        if args.rank == 0:
+            args.logger(f"Warning: 'pred_threshold' not found in args, using default: {args.pred_threshold}")
+    if not hasattr(args, 'grad_clip_norm'):
+        args.grad_clip_norm = 1.0
+        if args.rank == 0:
+            args.logger(f"Warning: 'grad_clip_norm' not found in args, using default: {args.grad_clip_norm}")
+    if args.rank == 0:
+        args.logger("[Done] check_args")
     return args
 
 def get_available_model_id(pretrain_dir, model_id):
@@ -80,7 +95,7 @@ def main_worker(args):
             break
         model_id = get_available_model_id(args.pretrain_dir, model_id)
         if args.rank == 0:
-            print(f"Training model {model_id + 1}/{args.model_num}")
+            args.logger(f"Training model {model_id + 1}/{args.model_num}")
         args = check_args(args)
         model = define_language_model(args.model_path, args.net_type, args.nclass).to(args.device)
         model = DDP(model, device_ids=[args.rank])
@@ -89,7 +104,7 @@ def main_worker(args):
         init_path = os.path.join(args.pretrain_dir, f"premodel{model_id}_init.pth.tar")
         if args.rank == 0 and not os.path.exists(init_path):
             torch.save(model.state_dict(), init_path)
-            print(f"Model {model_id} initial state saved at {init_path}")
+            args.logger(f"Model {model_id} initial state saved at {init_path}")
 
         # Define loss function, optimizer, and scheduler
         if args.is_multilabel:
@@ -97,24 +112,25 @@ def main_worker(args):
             # 定义用于追踪最佳模型的指标 (例如 mAP 或 F1-micro)
             best_metric_key = 'mAP' # 或者 'f1_micro'
             best_metric = 0.0       # 初始化为 0 (越高越好)
-            print(f"Using multi-label criterion (BCEWithLogitsLoss) and tracking best '{best_metric_key}'.")
+            args.logger(f"Using multi-label criterion (BCEWithLogitsLoss) and tracking best '{best_metric_key}'.")
         else:
             criterion = torch.nn.CrossEntropyLoss().to(args.device)
             # 定义用于追踪最佳模型的指标 (例如 Top-1 Accuracy)
             best_metric_key = 'top1'
             best_metric = 0.0       # 初始化为 0 (越高越好)
-            print(f"Using single-label criterion (CrossEntropyLoss) and tracking best '{best_metric_key}'.")
+            args.logger(f"Using single-label criterion (CrossEntropyLoss) and tracking best '{best_metric_key}'.")
 
         optimizer = optim.AdamW(
             model.parameters(),
             lr=args.lr,
-            # momentum=args.momentum,
-            # weight_decay=args.weight_decay,
+            weight_decay=getattr(args, "weight_decay", 0.0),
         )
-        scheduler = optim.lr_scheduler.MultiStepLR(
+        total_training_steps = len(train_loader) * args.pertrain_epochs
+        warmup_steps = min(int(getattr(args, "warmup_steps", 0)), total_training_steps)
+        scheduler = get_linear_schedule_with_warmup(
             optimizer,
-            milestones=[2 * args.pertrain_epochs // 3, 5 * args.pertrain_epochs // 6], ## 在epoch 2/3和5/6处进行学习率衰减
-            gamma=0.2,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=total_training_steps,
         )
         # _, aug_rand = diffaug(args)
         aug_rand = None
@@ -130,12 +146,14 @@ def main_worker(args):
                 epoch,
                 aug_rand,
                 mixup=args.mixup,
+                scheduler=scheduler,
+                grad_clip_value=getattr(args, "grad_clip_norm", None),
             )
             train_loss = train_metrics['loss']
 
             # 打印训练指标
             if args.rank == 0:
-                print(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Training Metrics:")
+                args.logger(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Training Metrics:")
                 log_str = f"  Loss: {train_loss:.4f}"
                 if args.is_multilabel:
                     log_str += f" | Prec (micro): {train_metrics.get('prec_micro', 0.0):.4f}"
@@ -145,14 +163,14 @@ def main_worker(args):
                 else:
                     log_str += f" | Top-1 Acc: {train_metrics.get('top1', 0.0):.2f}%"
                     log_str += f" | Top-5 Acc: {train_metrics.get('top5', 0.0):.2f}%"
-                print(log_str)
+                args.logger(log_str)
 
             val_metrics = validate(args, val_loader, model, criterion)
             val_loss = val_metrics['loss']
 
             # 打印验证指标
             if args.rank == 0:
-                print(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Validation Metrics:")
+                args.logger(f"Epoch [{epoch+1}/{args.pertrain_epochs}] Validation Metrics:")
                 log_str = f"  Loss: {val_loss:.4f}"
                 current_metric = 0.0 # 初始化当前轮次的最佳指标值
                 if args.is_multilabel:
@@ -165,7 +183,7 @@ def main_worker(args):
                     log_str += f" | Top-1 Acc: {val_metrics.get('top1', 0.0):.2f}%"
                     log_str += f" | Top-5 Acc: {val_metrics.get('top5', 0.0):.2f}%"
                     current_metric = val_metrics.get(best_metric_key, 0.0) # 获取用于比较的指标
-                print(log_str)
+                args.logger(log_str)
 
             epoch_time = time.time() - start_time
             if args.rank == 0:
@@ -186,7 +204,6 @@ def main_worker(args):
                             model_id, epoch, train_metrics.get('top1', 0.0), train_loss, val_metrics.get('top1', 0.0), epoch_time
                         )
                     )
-            scheduler.step()
 
         # Save trained model state
         trained_path = os.path.join(
@@ -194,7 +211,7 @@ def main_worker(args):
         )
         if args.rank == 0:
             torch.save(model.state_dict(), trained_path)
-            print(f"Model {model_id} trained state saved at {trained_path}")
+            args.logger(f"Model {model_id} trained state saved at {trained_path}")
 
     dist.destroy_process_group()
 
@@ -255,7 +272,8 @@ def main():
     for arg_name, arg_value in sorted(vars(args).items()):
         if not arg_name.startswith('_'):  # 跳过私有属性
             args_str += f"  {arg_name}: {arg_value}\n"
-    args.logger(args_str)
+    if args.rank == 0:
+        args.logger(args_str)
 
     main_worker(args)
 

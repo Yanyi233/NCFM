@@ -58,26 +58,29 @@ def load_state_dict(state_dict_path, model):
 def gather_save_visualize(synset, args, iteration=None):
     temp_save_dir = os.path.join(
         args.save_dir, "temp_rank_data"
-    )  # Temporary directory to save rank data
+    )
     os.makedirs(temp_save_dir, exist_ok=True)
     save_iteration = (
         (iteration + 1) if iteration is not None else "init"
-    )  # Set iteration name
+    )
+    # 每个 rank 保存自己的临时文件
     temp_file_path = os.path.join(
         temp_save_dir, f"temp_rank_{args.rank}_{save_iteration}.pt"
     )
     torch.save(
         [synset.data.detach().cpu(), synset.targets.cpu()], temp_file_path
-    )  # Save data and targets for this rank
-    dist.barrier()  # Synchronize all processes
-    if args.rank == 0:
+    )
+    dist.barrier()  # 等待所有进程完成保存
+
+    if args.rank == 0: # 只有 rank 0 执行以下操作
         all_data = []
         all_targets = []
-        for r in range(args.world_size):
-            temp_file_path = os.path.join(
+        for r in range(args.world_size): # 遍历所有 rank
+            temp_file_path_to_load = os.path.join( # 构造要加载的临时文件名
                 temp_save_dir, f"temp_rank_{r}_{save_iteration}.pt"
             )
-            data, targets = torch.load(temp_file_path)  # Load data from all ranks
+            # 从每个 rank 的临时文件加载数据
+            data, targets = torch.load(temp_file_path_to_load)  # <--- 报错发生在这里
             all_data.append(data)
             all_targets.append(targets)
         all_data = torch.cat(all_data, dim=0)  # Concatenate data from all ranks
@@ -109,6 +112,8 @@ def gather_save_visualize(synset, args, iteration=None):
         os.rmdir(temp_save_dir)  # Remove the temporary directory
     else:
         pass
+    dist.barrier() # 确保 rank 0 完成了所有操作 (包括删除临时文件) 后，其他进程再继续。
+                   # 如果 rank 0 进程在读取或删除时崩溃，其他 rank 的临时文件可能不会被删除。
 
 
 def sync_distributed_metric(metric):

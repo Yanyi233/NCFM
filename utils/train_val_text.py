@@ -34,7 +34,16 @@ def sync_distributed_metric_dict(metrics_dict, device):
 
 
 def train_epoch(
-    args, train_loader, model, criterion, optimizer, epoch, aug=None, mixup="cut"
+    args,
+    train_loader,
+    model,
+    criterion,
+    optimizer,
+    epoch,
+    aug=None,
+    mixup="cut",
+    scheduler=None,
+    grad_clip_value=None,
 ):
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -105,7 +114,7 @@ def train_epoch(
 
         if args.is_multilabel:
             with torch.no_grad():
-                scores = torch.sigmoid(output.data)
+                scores = torch.sigmoid(output.detach())
                 # Ensure prediction threshold is appropriate, e.g. 0.5 for general cases
                 # Using args.pred_threshold if available, otherwise a common default like 0.5
                 pred_threshold = getattr(args, 'pred_threshold', 0.5)
@@ -133,7 +142,11 @@ def train_epoch(
 
         optimizer.zero_grad()
         loss.backward()
+        if grad_clip_value is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
         batch_time.update(time.time() - end)
         end = time.time()
@@ -144,10 +157,10 @@ def train_epoch(
         metrics['rec_micro'] = rec_micro.avg
         metrics['f1_micro'] = f1_micro.avg
         metrics['hamming'] = hamming.avg
-        
+
         if all_targets_list and all_outputs_list: # Ensure lists are not empty
-            all_outputs = torch.cat(all_outputs_list, dim=0)
-            all_targets = torch.cat(all_targets_list, dim=0)
+            all_outputs = torch.cat([out.detach().cpu() for out in all_outputs_list], dim=0)
+            all_targets = torch.cat([t.detach().cpu() for t in all_targets_list], dim=0)
             scores = torch.sigmoid(all_outputs).numpy()
             targets_np = all_targets.numpy().astype(int)
             

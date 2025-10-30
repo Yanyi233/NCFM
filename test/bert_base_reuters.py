@@ -19,12 +19,14 @@ DATA_FILES = {
 }
 MODEL_PATH = "models/model/bert-base-uncased" # 或者您本地的 "models/model/bert-base-uncased"
 # NUM_CLASSES 将在数据加载后根据标签列确定 (应为90)
-BATCH_SIZE = 32
-LEARNING_RATE = 1e-4
+BATCH_SIZE = 32  # 减小批次大小，提高训练稳定性
+LEARNING_RATE = 3e-5  # 降低学习率，BERT微调的标准学习率
 NUM_EPOCHS = 30      
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MAX_LENGTH = 512    # BERT最大序列长度
 TEXT_COLUMN = 'sentence' # 更新：用户指定文本列名
+THRESHOLD = 0.3  # 降低预测阈值，提高召回率
+WARMUP_STEPS = 100  # 学习率预热步数
 
 print(f"使用设备: {DEVICE}")
 
@@ -67,7 +69,10 @@ try:
         labels_batch = []
         for label_str in examples[label_column]:
             # 将字符串形式的列表转换为实际的列表
-            label_list = eval(label_str) if isinstance(label_str, str) else label_list
+            if isinstance(label_str, str):
+                label_list = eval(label_str)
+            else:
+                label_list = label_str  # 如果已经是列表，直接使用
             labels_batch.append(label_list)
         
         # 确保标签是浮点类型
@@ -128,6 +133,13 @@ try:
         if 'token_type_ids' in sample_batch:
             print(f"样本批次 token_type_ids 形状: {sample_batch['token_type_ids'].shape}")
         print(f"样本批次 labels 形状: {sample_batch['labels'].shape}")
+        
+        # 检查标签分布
+        labels_sample = sample_batch['labels']
+        print(f"标签值范围: [{labels_sample.min():.3f}, {labels_sample.max():.3f}]")
+        print(f"正标签比例: {labels_sample.mean():.3f}")
+        print(f"每个样本的平均标签数: {labels_sample.sum(dim=1).mean():.3f}")
+        
     except Exception as e:
         print(f"检查 DataLoader 样本批次时出错: {e}")
         import traceback
@@ -172,10 +184,19 @@ except Exception as e:
 
 # --- 损失函数、优化器 ---
 criterion = nn.BCEWithLogitsLoss()
-optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+
+# 添加学习率调度器
+from transformers import get_linear_schedule_with_warmup
+total_steps = len(train_loader) * NUM_EPOCHS
+scheduler = get_linear_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=WARMUP_STEPS,
+    num_training_steps=total_steps
+)
 
 # --- 训练函数 ---
-def train_one_epoch(model, loader, criterion, optimizer, device):
+def train_one_epoch(model, loader, criterion, optimizer, scheduler, device):
     model.train()
     running_loss = 0.0
     total_samples = 0
@@ -197,7 +218,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         loss = criterion(logits, targets)
 
         loss.backward()
+        
+        # 添加梯度裁剪，防止梯度爆炸
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         optimizer.step()
+        scheduler.step()  # 更新学习率
 
         running_loss += loss.item() * input_ids.size(0)
         total_samples += input_ids.size(0)
@@ -234,7 +260,7 @@ def evaluate(model, loader, criterion, device, num_classes_eval): # Pass num_cla
             total_samples += input_ids.size(0)
 
             scores = torch.sigmoid(logits)
-            preds = (scores > 0.5).float()
+            preds = (scores > THRESHOLD).float()
             
             all_preds.append(preds.cpu())
             all_targets.append(targets.cpu())
@@ -298,7 +324,7 @@ best_f1_sum = 0.0
 best_metrics = None
 
 for epoch in range(NUM_EPOCHS):
-    train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
+    train_loss = train_one_epoch(model, train_loader, criterion, optimizer, scheduler, DEVICE)
     
     print(f"\n在验证集上评估第 {epoch+1} 轮...")
     # Pass NUM_CLASSES to evaluate for mAP calculation consistency

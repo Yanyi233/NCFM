@@ -94,7 +94,6 @@ def define_model(dataset, norm_type, net_type, nch, depth, width, nclass, logger
     return model
 
 def define_language_model(model_path, net_type, num_classes):
-    ## TODO:看是否需要添加新的模型类型，如BERT等
     if net_type == 'BERT':
         model = BERT.BERTWithFeatures(num_classes=num_classes, pretrained_model_name=model_path)
     else:
