@@ -186,6 +186,7 @@ class Condenser:
         model_final,
         sampling_net=None,
         optim_sampling_net=None,
+        val_loader=None,
     ):
         """训练合成数据"""
         loader_real = AsyncLoader(
@@ -213,6 +214,7 @@ class Condenser:
         
         # 保存初始状态
         gather_save_visualize(self, args)
+        eval_interval = getattr(args, "eval_interval", 0)
         
         if args.local_rank == 0:
             pbar = tqdm(range(args.niter), desc="Condensing", unit="iter")
@@ -353,6 +355,19 @@ class Condenser:
             if scheduler_sampling_net is not None:
                 scheduler_sampling_net.step(current_loss)
             self.timing_tracker.record("scheduler_step")
+
+            if (
+                eval_interval
+                and eval_interval > 0
+                and val_loader is not None
+                and (it + 1) % eval_interval == 0
+            ):
+                dist.barrier()
+                if args.rank == 0:
+                    self.logger(f"Starting evaluation at iteration {it + 1}")
+                syndataloader = self.get_syndataLoader(args, args.augment)
+                self.evaluate(args, syndataloader, val_loader)
+                dist.barrier()
 
         # 训练结束后最后保存一次
         self.logger(f"Condensation finished after {args.niter} iterations. Final Gather and Save Data!")

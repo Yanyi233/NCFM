@@ -27,14 +27,15 @@ network:
 
 # 训练配置 (用于 Pretrain 和 Evaluation)
 train:
-  evaluation_epochs: 200     # 评估模式下的训练轮数
+  pre_eval_epochs: 10        # 蒸馏前预热评估的训练轮数
+  evaluation_epochs: 400     # 蒸馏过程中的评估轮数
   epoch_print_freq: 10      # 打印频率
-  epoch_eval_interval: 5    # 评估间隔 (轮)
+  epoch_eval_interval: 20    # 评估间隔 (轮)
   pertrain_epochs: 30       # 预训练模式下的轮数 (根据需要调整)
   batch_size: 32            # 预训练/评估时的训练批次大小 (会被 world_size 除)
-  lr: 0.00003               # 学习率 (BERT 微调推荐范围)
-  adamw_lr: 0.00003         # 如果 eval_optimizer 是 adamw
-  eval_optimizer: sgd      # 评估时使用的优化器 (adam 或 sgd)
+  lr: 0.001               # 学习率 (BERT 微调推荐范围)
+  adamw_lr: 0.0008         # 如果 eval_optimizer 是 adamw
+  eval_optimizer: adamw      # 评估时使用的优化器 (adam 或 sgd)
   momentum: 0.9             # SGD momentum (如果 eval_optimizer 是 sgd)  
   weight_decay: 0.01        # 权重衰减 (BERT 微调常用设定)
   seed: 42                  # 随机种子
@@ -55,7 +56,7 @@ augmentation:
 
 # 优化配置 (用于 Condense)
 optimization:
-  optimizer: sgd           # 蒸馏优化器 (adam 或 sgd)
+  optimizer: adamw           # 蒸馏优化器 (adam 或 sgd)
   lr_scale_adam: 0.1        # Adam/AdamW 学习率缩放因子 (相对于 lr_img)
   lr_img: 0.01              # 蒸馏图像的学习率 (如果 optimizer=sgd)
   mom_img: 0.5              # 蒸馏图像的 momentum (如果 optimizer=sgd)

@@ -49,6 +49,15 @@ def check_args(args):
         if args.rank == 0:
             print(f"Warning: 'is_multilabel' not found in args, using default: {args.is_multilabel}")
     
+    if not hasattr(args, 'softlabel'):
+        args.softlabel = False
+    if not hasattr(args, 'kldiv'):
+        args.kldiv = False
+    if not hasattr(args, 'temperature'):
+        args.temperature = 1.0
+    if not hasattr(args, 'val_repeat'):
+        args.val_repeat = 1
+    
     return args
 
 def main_worker(args):
@@ -58,6 +67,22 @@ def main_worker(args):
     plotter = get_plotter(args)
 
     loader_real,_ = get_loader(args)
+    original_mode = args.run_mode
+    args.run_mode = "Evaluation"
+    original_epochs = getattr(args, "evaluation_epochs", 200)
+    original_print = getattr(args, "epoch_print_freq", 10)
+    original_interval = getattr(args, "epoch_eval_interval", 5)
+    args.evaluation_epochs = getattr(args, "pre_eval_epochs", 10)
+    args.epoch_print_freq = min(args.evaluation_epochs, original_print)
+    args.epoch_eval_interval = min(args.evaluation_epochs, original_interval)
+    _, val_loader = get_loader(args)
+    args.evaluation_epochs = original_epochs
+    args.epoch_print_freq = original_print
+    args.epoch_eval_interval = original_interval
+    args.run_mode = original_mode
+    if val_loader is None and args.rank == 0:
+        args.logger("Warning: Validation loader could not be constructed.")
+    eval_interval = getattr(args, "eval_interval", 0)
 
 
     # aug, _ = diffaug(args)
@@ -67,15 +92,22 @@ def main_worker(args):
     condenser = Condenser(args, nclass_list=args.class_list, device='cuda')
     
     # 加载合成数据
-    for local_rank in range(args.local_world_size):
-        if args.local_rank == local_rank:
-            condenser.load_condensed_data(
-                loader_real, 
-                init_type=args.init,
-                load_path=args.load_path
-            )
-            print(f"============RANK:{dist.get_rank()}====LOCAL_RANK {local_rank} Loaded Condensed Data==========================")
-        dist.barrier()
+    if args.world_size > 1:
+        for local_rank in range(args.local_world_size):
+            if args.local_rank == local_rank:
+                condenser.load_condensed_data(
+                    loader_real, 
+                    init_type=args.init,
+                    load_path=args.load_path
+                )
+                print(f"============RANK:{dist.get_rank()}====LOCAL_RANK {local_rank} Loaded Condensed Data==========================")
+            dist.barrier()
+    else:
+        condenser.load_condensed_data(
+            loader_real,
+            init_type=args.init,
+            load_path=args.load_path
+        )
     
     # 设置优化器
     optim_text = get_optimizer(
@@ -89,11 +121,12 @@ def main_worker(args):
     
     # 设置采样网络（如果需要）
     if args.sampling_net:
-        sampling_net = SampleNet(feature_dim=768)  # BERT的隐藏维度是768
+        sampling_net = SampleNet(feature_dim=768).to(args.device)  # BERT的隐藏维度是768
+        sampling_lr = getattr(args, "lr_sampling_net", args.lr_img)
         optim_sampling_net = get_optimizer(
             optimizer=args.optimizer, 
-            parameters=sampling_net,
-            lr=args.lr_img, 
+            parameters=sampling_net.parameters(),
+            lr=sampling_lr, 
             mom_img=args.mom_img,
             weight_decay=args.weight_decay,
             logger=args.logger
@@ -104,11 +137,40 @@ def main_worker(args):
     
     # 检查参数
     args = check_args(args)
+
+    if val_loader is not None:
+        tmp_epochs = args.evaluation_epochs
+        args.evaluation_epochs = getattr(args, "pre_eval_epochs", 10)
+        initial_syndataloader = condenser.get_syndataLoader(args, args.augment)
+        condenser.evaluate(args, initial_syndataloader, val_loader)
+        args.evaluation_epochs = tmp_epochs
     
     # 获取特征提取器
     model_init, model_interval, model_final = get_feature_extractor(args)
-    condenser.condense(args, plotter, loader_real, aug, optim_text, model_init, model_interval, model_final, sampling_net, optim_sampling_net)
+    saved_eval_epochs = args.evaluation_epochs
+    saved_print_freq = args.epoch_print_freq
+    saved_eval_interval = args.epoch_eval_interval
+    args.evaluation_epochs = 100
+    args.epoch_print_freq = min(args.epoch_print_freq, args.evaluation_epochs)
+    args.epoch_eval_interval = min(args.epoch_eval_interval, args.evaluation_epochs)
 
+    condenser.condense(
+        args,
+        plotter,
+        loader_real,
+        aug,
+        optim_text,
+        model_init,
+        model_interval,
+        model_final,
+        sampling_net,
+        optim_sampling_net,
+        val_loader=val_loader
+    )
+
+    args.evaluation_epochs = saved_eval_epochs
+    args.epoch_print_freq = saved_print_freq
+    args.epoch_eval_interval = saved_eval_interval
     dist.destroy_process_group()
 
 
@@ -125,12 +187,33 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--ipc', type=int, default=10, help='number of condensed data per class')
     parser.add_argument('--tf32', action='store_true',default=True,help='Enable TF32')
     parser.add_argument('--sampling_net', action='store_true',default=False,help='Enable sampling_net')
+    parser.add_argument('--eval_interval', type=int, default=0, help='Run evaluation every N condensation iterations (0 disables)')
+    parser.add_argument('--val_repeat', type=int, default=1, help='Times to repeat evaluation when run during condensation')
     args = parser.parse_args()
+
+    cli_overrides = {}
+    for action in parser._actions:
+        if not hasattr(action, 'dest'):
+            continue
+        dest = action.dest
+        if dest in (None, 'help'):
+            continue
+        current = getattr(args, dest, None)
+        default = parser.get_default(dest)
+        if current is not None and current != default:
+            cli_overrides[dest] = current
+
     args_processor = ArgsProcessor(args.config_path)
     args = args_processor.add_args_from_yaml(args)
+    for key, value in cli_overrides.items():
+        setattr(args, key, value)
     
-    torch.autograd.set_detect_anomaly(True)
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    if args.debug:
+        torch.autograd.set_detect_anomaly(True)
+    else:
+        torch.autograd.set_detect_anomaly(False)
+
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(args.gpu))
     init_script(args)
     # 格式化args输出
     args_str = "Experiment Configuration:\n"

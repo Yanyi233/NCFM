@@ -7,17 +7,47 @@ from collections import OrderedDict
 
 
 def initialize_distribution_training(backend="nccl", init_method="env://"):
-    dist.init_process_group(
-        backend=backend, init_method=init_method, timeout=timedelta(seconds=3000)
-    )
-    rank = dist.get_rank()
-    world_size = dist.get_world_size()
-    # Get local rank from environment variable
-    local_rank = int(os.environ["LOCAL_RANK"])
-    local_world_size = int(os.environ["WORLD_SIZE"])
-    # Set the current GPU for this process
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
+    # Detect whether torchrun style env variables are available
+    env_rank = os.environ.get("RANK")
+    env_world_size = os.environ.get("WORLD_SIZE")
+    env_local_rank = os.environ.get("LOCAL_RANK")
+    env_local_world_size = os.environ.get("LOCAL_WORLD_SIZE")
+
+    if env_rank is None or env_world_size is None:
+        master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
+        master_port = os.environ.get("MASTER_PORT", "29500")
+        init_url = f"tcp://{master_addr}:{master_port}"
+        backend_to_use = backend
+        if backend_to_use == "nccl" and not torch.cuda.is_available():
+            backend_to_use = "gloo"
+        dist.init_process_group(
+            backend=backend_to_use,
+            init_method=init_url,
+            timeout=timedelta(seconds=3000),
+            rank=0,
+            world_size=1,
+        )
+        rank = 0
+        world_size = 1
+        local_rank = 0
+        local_world_size = 1
+    else:
+        dist.init_process_group(
+            backend=backend, init_method=init_method, timeout=timedelta(seconds=3000)
+        )
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        local_rank = int(env_local_rank) if env_local_rank is not None else rank
+        local_world_size = (
+            int(env_local_world_size)
+            if env_local_world_size is not None
+            else int(env_world_size)
+        )
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+    else:
+        device = torch.device("cpu")
     return rank, world_size, local_rank, local_world_size, device
 
 
